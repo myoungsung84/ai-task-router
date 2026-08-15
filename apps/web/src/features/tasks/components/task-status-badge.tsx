@@ -1,5 +1,6 @@
 import { cn } from "@/lib/format";
-import type { RunnerStatus, TaskStatus } from "../types";
+import { TASK_STATUS_LABEL } from "../workflow-labels";
+import type { TaskStatus } from "../types";
 
 const STATUS_STYLES: Record<TaskStatus, string> = {
   QUEUED: "bg-slate-600/30 text-slate-300 border-slate-500/40",
@@ -11,34 +12,30 @@ const STATUS_STYLES: Record<TaskStatus, string> = {
   CANCELLED: "bg-zinc-600/20 text-zinc-400 border-zinc-500/40",
 };
 
+// Not color alone: every status also gets a distinct glyph.
+const STATUS_ICON: Record<TaskStatus, string> = {
+  QUEUED: "⏳",
+  RUNNING: "▶",
+  REVIEWING: "🔍",
+  READY: "✓",
+  WARNING: "⚠",
+  FAILED: "✕",
+  CANCELLED: "⏹",
+};
+
 export function TaskStatusBadge({ status }: { status: TaskStatus }) {
+  const animated = status === "RUNNING" || status === "REVIEWING";
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium",
+        "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium",
         STATUS_STYLES[status],
       )}
     >
-      {status}
-    </span>
-  );
-}
-
-const RUNNER_ICON: Record<RunnerStatus, string> = {
-  PENDING: "⏳",
-  RUNNING: "🔄",
-  SUCCESS: "✅",
-  FAILED: "❌",
-  SKIPPED: "⏭",
-  CANCELLED: "🚫",
-};
-
-export function RunnerStatusPill({ label, status }: { label: string; status: RunnerStatus }) {
-  return (
-    <span className="inline-flex items-center gap-1 text-xs text-[#c8d1db]">
-      <span className="text-[#8291a3]">{label}</span>
-      <span>{RUNNER_ICON[status]}</span>
-      <span className="mono">{status}</span>
+      <span aria-hidden className={cn(animated && "motion-safe:animate-pulse")}>
+        {STATUS_ICON[status]}
+      </span>
+      {TASK_STATUS_LABEL[status]}
     </span>
   );
 }

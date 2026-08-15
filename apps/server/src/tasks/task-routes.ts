@@ -74,6 +74,13 @@ taskRouter.post("/:id/cancel", (req, res) => {
   res.json(task);
 });
 
+// Completed-task cleanup (Settings/History UX) — RUNNING/REVIEWING tasks are
+// rejected by taskService.deleteTask, never force-removed.
+taskRouter.delete("/:id", (req, res) => {
+  taskService.deleteTask(requireIdParam(req));
+  res.status(204).end();
+});
+
 taskRouter.get("/:id/events", taskEventsHandler);
 
 // Central error handler for TaskServiceError raised anywhere above.

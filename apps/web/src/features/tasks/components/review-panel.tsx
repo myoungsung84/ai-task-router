@@ -1,6 +1,6 @@
 import { Card } from "@/components/card";
 import { cn } from "@/lib/format";
-import type { CodexReviewResult } from "../types";
+import type { ReviewOutcome } from "../types";
 
 const SEVERITY_STYLE: Record<string, string> = {
   high: "border-red-500/40 bg-red-600/10 text-red-300",
@@ -8,17 +8,18 @@ const SEVERITY_STYLE: Record<string, string> = {
   low: "border-slate-500/40 bg-slate-600/10 text-slate-300",
 };
 
-export function CodexReviewPanel({ review }: { review: CodexReviewResult | null }) {
+/** Renders one `review`-action Step's outcome. A Task's workflow can (in principle) include more than one review Step, so the caller maps over them and passes a `title` distinguishing each. */
+export function ReviewPanel({ title, review }: { title: string; review: ReviewOutcome | null }) {
   if (!review) {
     return (
-      <Card title="Codex 리뷰 결과">
+      <Card title={title}>
         <p className="text-sm text-[#8291a3]">아직 리뷰가 수행되지 않았습니다.</p>
       </Card>
     );
   }
 
   return (
-    <Card title="Codex 리뷰 결과">
+    <Card title={title}>
       <div className="mb-3 flex items-center gap-2">
         <span
           className={cn(

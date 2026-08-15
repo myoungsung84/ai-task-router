@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { workflowSpecSchema } from "./workflow-spec-schema";
 
 /**
  * Single source of truth for "create a task" input shape, shared by the
@@ -26,6 +27,7 @@ export const taskSpecShape = {
     .nullable()
     .optional()
     .describe("작업할 브랜치. 없으면 현재 브랜치에서 작업 (선택)"),
+  workflow: workflowSpecSchema.nullable().optional(),
 };
 
 export const taskSpecSchema = z.object(taskSpecShape);

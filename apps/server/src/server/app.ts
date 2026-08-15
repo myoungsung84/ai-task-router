@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import { config } from "../config";
 import { taskRouter } from "../tasks/task-routes";
+import { settingsRouter } from "../settings/settings-routes";
 import { mcpRouter, activeMcpSessionCount } from "../mcp/mcp-router";
 import { MCP_TOOL_NAMES } from "../mcp/mcp-server";
 
@@ -22,7 +23,9 @@ export function createApp() {
   });
 
   // Dashboard API: restricted to the configured web origin.
-  app.use("/api/tasks", cors({ origin: config.webOrigin }), taskRouter);
+  const dashboardCors = cors({ origin: config.webOrigin });
+  app.use("/api/tasks", dashboardCors, taskRouter);
+  app.use("/api/settings", dashboardCors, settingsRouter);
 
   // MCP endpoint: deliberately more permissive. This is a local-only dev
   // tool (see docs/architecture.md); MCP clients are typically not browser

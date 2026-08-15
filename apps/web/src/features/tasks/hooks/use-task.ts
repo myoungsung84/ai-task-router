@@ -42,17 +42,10 @@ export function useTask(id: string) {
         setTask((prev) => (prev ? { ...prev, logs: [...prev.logs, parsed.log] } : prev));
       } else if (parsed.type === "status") {
         setTask((prev) =>
-          prev
-            ? {
-                ...prev,
-                status: parsed.status,
-                claudeStatus: parsed.claudeStatus,
-                codexStatus: parsed.codexStatus,
-              }
-            : prev,
+          prev ? { ...prev, status: parsed.status, workflow: parsed.workflow } : prev,
         );
-        // Status changes (claudeResult/codexReviewResult/error/timestamps) need
-        // the authoritative object — a light refetch keeps those fields in sync.
+        // Status changes (error/timestamps/gitInfo) need the authoritative
+        // object — a light refetch keeps those fields in sync.
         void tasksApi
           .get(id)
           .then((fresh) => setTask((prev) => (prev ? { ...fresh, logs: prev.logs } : fresh)))

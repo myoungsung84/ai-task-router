@@ -19,7 +19,12 @@ import {
  * execution logic — git/Claude/Codex handling — lives here or gets
  * duplicated here. `taskSpecShape` is imported rather than redefined so the
  * REST route and the MCP tools validate "create a task" input identically.
+ *
+ * Every `taskId` parameter below accepts either the internal UUID or the
+ * short Job ID (e.g. "T-1042") — taskService resolves both the same way.
  */
+
+const TASK_ID_DESCRIPTION = "Task의 UUID 또는 Job ID (예: T-1042)";
 
 function textResult(payload: unknown): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
@@ -41,25 +46,28 @@ async function createAndStartTask(spec: TaskSpec) {
     instruction: spec.instruction,
     baseBranch: spec.baseBranch ?? null,
     branch: spec.branch ?? null,
+    workflow: spec.workflow ?? null,
   });
 
   try {
     // startTask kicks off TaskExecutor asynchronously (fire-and-forget under
     // the hood) and resolves as soon as the RUNNING transition is recorded —
-    // it does not wait for Claude or Codex to finish.
+    // it does not wait for any Step to finish.
     const started = await taskService.startTask(task.id);
     return {
       taskId: started.id,
+      jobId: started.jobId,
       status: started.status,
-      dashboardUrl: dashboardTaskUrl(started.id),
+      dashboardUrl: dashboardTaskUrl(started),
     };
   } catch (err) {
     // Task exists but couldn't be started (e.g. same-project already busy).
     // Surface that as a warning rather than losing the created task.
     return {
       taskId: task.id,
+      jobId: task.jobId,
       status: task.status,
-      dashboardUrl: dashboardTaskUrl(task.id),
+      dashboardUrl: dashboardTaskUrl(task),
       warning: err instanceof TaskServiceError ? err.message : messageOf(err),
     };
   }
@@ -71,7 +79,7 @@ export function registerTaskTools(server: McpServer): void {
     {
       title: "Run Task",
       description:
-        "새 Task를 생성하고 즉시 실행한다. Claude/Codex 작업 완료를 기다리지 않고 taskId를 바로 반환한다.",
+        "새 Task를 생성하고 즉시 실행한다. Claude/Codex 작업 완료를 기다리지 않고 taskId/jobId를 바로 반환한다. workflow를 생략하면 Settings의 기본 Workflow를 사용한다.",
       inputSchema: taskSpecShape,
     },
     async (args) => {
@@ -88,7 +96,7 @@ export function registerTaskTools(server: McpServer): void {
     {
       title: "Run Tasks",
       description:
-        "여러 Task를 한 번에 생성하고 즉시 실행한다. 서로 다른 프로젝트는 병렬로 실행된다. 각 Task 완료를 기다리지 않고 taskId 목록을 즉시 반환한다.",
+        "여러 Task를 한 번에 생성하고 즉시 실행한다. 서로 다른 프로젝트는 병렬로 실행된다. 각 Task 완료를 기다리지 않고 taskId/jobId 목록을 즉시 반환한다.",
       inputSchema: {
         tasks: z.array(z.object(taskSpecShape)).min(1).describe("실행할 Task 목록"),
       },
@@ -130,14 +138,14 @@ export function registerTaskTools(server: McpServer): void {
     {
       title: "Get Task",
       description:
-        "특정 Task의 현재 상태, Claude/Codex 결과, 변경 파일을 조회한다. 전체 실시간 로그는 포함하지 않는다.",
-      inputSchema: { taskId: z.string().min(1) },
+        "특정 Task의 현재 상태, Workflow Step별 결과, 변경 파일을 조회한다. 전체 실시간 로그는 포함하지 않는다.",
+      inputSchema: { taskId: z.string().min(1).describe(TASK_ID_DESCRIPTION) },
     },
     async ({ taskId }) => {
       const task = taskService.getTask(taskId);
       if (!task) return errorResult(`Task를 찾을 수 없습니다: ${taskId}`);
       try {
-        const { changedFiles } = await taskService.getTaskDiff(taskId);
+        const { changedFiles } = await taskService.getTaskDiff(task.id);
         return textResult(toTaskDetail(task, changedFiles));
       } catch (err) {
         // Project path may be gone/inaccessible — still return task status.
@@ -151,9 +159,9 @@ export function registerTaskTools(server: McpServer): void {
     {
       title: "Get Task Result",
       description:
-        "완료된 Task의 최종 검토용 정보(원 지시사항, 최종 상태, Claude/Codex 결과, git status, 변경 파일, git diff)를 반환한다. diff가 큰 경우 잘라서 반환하며 그 사실을 diffTruncated로 표시한다.",
+        "완료된 Task의 최종 검토용 정보(원 지시사항, 최종 상태, Workflow Step별 결과, git status, 변경 파일, git diff)를 반환한다. diff가 큰 경우 잘라서 반환하며 그 사실을 diffTruncated로 표시한다.",
       inputSchema: {
-        taskId: z.string().min(1),
+        taskId: z.string().min(1).describe(TASK_ID_DESCRIPTION),
         maxDiffChars: z
           .number()
           .int()
@@ -170,7 +178,7 @@ export function registerTaskTools(server: McpServer): void {
       let diffInfo = { diff: "", truncated: false, originalLength: 0 };
       let diffError: string | null = null;
       try {
-        const result = await taskService.getTaskDiff(taskId);
+        const result = await taskService.getTaskDiff(task.id);
         changedFiles = result.changedFiles;
         diffInfo = truncateDiff(result.diff, maxDiffChars ?? DEFAULT_MAX_DIFF_CHARS);
       } catch (err) {
@@ -179,21 +187,21 @@ export function registerTaskTools(server: McpServer): void {
 
       return textResult({
         taskId: task.id,
+        jobId: task.jobId,
         title: task.title,
         projectPath: task.projectPath,
         branch: task.branch,
         instruction: task.instruction,
         finalStatus: task.status,
         error: task.error,
-        claudeResult: task.claudeResult,
-        codexReviewResult: task.codexReviewResult,
+        workflow: task.workflow,
         gitStatus: diffError ? null : changedFilesToStatusText(changedFiles),
         changedFiles,
         diff: diffError ? null : diffInfo.diff,
         diffTruncated: diffInfo.truncated,
         diffOriginalLength: diffInfo.truncated ? diffInfo.originalLength : undefined,
         diffError,
-        dashboardUrl: dashboardTaskUrl(task.id),
+        dashboardUrl: dashboardTaskUrl(task),
       });
     },
   );
@@ -204,12 +212,12 @@ export function registerTaskTools(server: McpServer): void {
       title: "Cancel Task",
       description:
         "실행 중(RUNNING/REVIEWING)인 Task를 중단한다. 해당 Task의 프로세스만 종료되며 다른 Task에는 영향이 없다.",
-      inputSchema: { taskId: z.string().min(1) },
+      inputSchema: { taskId: z.string().min(1).describe(TASK_ID_DESCRIPTION) },
     },
-    ({ taskId }) => {
+    (args) => {
       try {
-        const task = taskService.cancelTask(taskId);
-        return textResult({ taskId: task.id, status: task.status });
+        const task = taskService.cancelTask(args.taskId);
+        return textResult({ taskId: task.id, jobId: task.jobId, status: task.status });
       } catch (err) {
         return errorResult(messageOf(err));
       }

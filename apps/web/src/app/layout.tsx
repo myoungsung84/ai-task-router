@@ -21,9 +21,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <Link href="/" className="hover:text-white">
                   Tasks
                 </Link>
+                <Link href="/settings" className="hover:text-white">
+                  Settings
+                </Link>
                 <Link
                   href="/tasks/new"
                   className="rounded-md bg-white/10 px-3 py-1.5 text-white hover:bg-white/20"
+                  title="Dashboard의 + New Task(모달)가 기본 경로입니다. 이 링크는 fallback입니다."
                 >
                   + New Task
                 </Link>

@@ -2,6 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import type { LogEntry, Task } from "@ai-task-router/shared";
 import { config } from "../config";
+import { allocateJobId } from "./job-id";
+import {
+  buildLegacyWorkflow,
+  needsLegacyMigration,
+  type StoredTaskRecord,
+} from "./legacy-task-normalizer";
 
 const MAX_IN_MEMORY_LOGS = 5000;
 
@@ -17,6 +23,7 @@ const MAX_IN_MEMORY_LOGS = 5000;
  */
 export class TaskStore {
   private tasks = new Map<string, Task>();
+  private jobIdIndex = new Map<string, string>(); // jobId -> uuid
   private tasksRootDir: string;
 
   constructor() {
@@ -29,17 +36,39 @@ export class TaskStore {
       ? fs.readdirSync(this.tasksRootDir, { withFileTypes: true })
       : [];
 
+    // Read every stored task first so legacy Job ID backfill can be assigned
+    // in creation order (oldest = lowest number), not directory-listing
+    // order (which is effectively random — it's sorted by UUID).
+    const loaded: { id: string; record: StoredTaskRecord }[] = [];
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       const metaPath = this.metaPath(entry.name);
       if (!fs.existsSync(metaPath)) continue;
       try {
-        const meta = JSON.parse(fs.readFileSync(metaPath, "utf8")) as Omit<Task, "logs">;
-        const logs = this.readLogsFromDisk(entry.name);
-        this.tasks.set(entry.name, { ...meta, logs });
+        const record = JSON.parse(fs.readFileSync(metaPath, "utf8")) as StoredTaskRecord;
+        loaded.push({ id: entry.name, record });
       } catch (err) {
         console.warn(`[task-store] ${entry.name} 태스크 로드 실패:`, err);
       }
+    }
+    loaded.sort(
+      (a, b) =>
+        new Date(a.record.createdAt ?? 0).getTime() - new Date(b.record.createdAt ?? 0).getTime(),
+    );
+
+    for (const { id, record } of loaded) {
+      const migrated = needsLegacyMigration(record);
+      const workflow = record.workflow ?? buildLegacyWorkflow(record);
+      const jobId = record.jobId ?? allocateJobId();
+      const logs = this.readLogsFromDisk(id);
+      const task: Task = { ...record, id, jobId, workflow, logs } as Task;
+
+      this.tasks.set(id, task);
+      this.jobIdIndex.set(jobId, id);
+
+      // Additive, one-time migration write-back (workflow/jobId only — logs
+      // and every legacy result field are left exactly as they were).
+      if (migrated) this.persistMeta(task);
     }
   }
 
@@ -85,12 +114,23 @@ export class TaskStore {
   create(task: Task): void {
     this.getTaskDir(task.id);
     this.tasks.set(task.id, task);
+    this.jobIdIndex.set(task.jobId, task.id);
     fs.writeFileSync(this.logsPath(task.id), "", "utf8");
     this.persistMeta(task);
   }
 
   get(id: string): Task | undefined {
     return this.tasks.get(id);
+  }
+
+  getByJobId(jobId: string): Task | undefined {
+    const id = this.jobIdIndex.get(jobId);
+    return id ? this.tasks.get(id) : undefined;
+  }
+
+  /** Accepts either the internal UUID or the human-friendly Job ID (e.g. "T-1042"). The one resolver every caller (REST, MCP, Dashboard) goes through. */
+  resolve(identifier: string): Task | undefined {
+    return this.tasks.get(identifier) ?? this.getByJobId(identifier);
   }
 
   list(): Task[] {
@@ -121,6 +161,15 @@ export class TaskStore {
       console.warn(`[task-store] ${id} 로그 기록 실패:`, err);
     }
     return current;
+  }
+
+  /** Removes a task's directory (JSON + logs) entirely. Used only for explicit, user-confirmed cleanup of completed tasks — never for RUNNING/REVIEWING ones (callers must check status first). */
+  delete(id: string): void {
+    const task = this.tasks.get(id);
+    if (!task) return;
+    this.tasks.delete(id);
+    this.jobIdIndex.delete(task.jobId);
+    fs.rmSync(this.getTaskDir(id), { recursive: true, force: true });
   }
 }
 

@@ -1,25 +1,8 @@
-import type { ChildProcess } from "node:child_process";
+import type { StepAction, StepPermission } from "@ai-task-router/shared";
 import { config } from "../../config";
 import { safeSpawn, killProcessTree } from "../common/process-utils";
-
-export interface RunnerLogLine {
-  stream: "stdout" | "stderr";
-  text: string;
-}
-
-export interface ClaudeRunHandle {
-  process: ChildProcess;
-  pid: number | undefined;
-  cancel: () => void;
-}
-
-export interface ClaudeRunResult {
-  exitCode: number | null;
-  success: boolean;
-  /** Trailing chunk of stdout, used as a quick-glance summary. */
-  summary: string;
-  cancelled: boolean;
-}
+import { buildReviewPrompt, parseReviewJson } from "../review-prompt";
+import type { AgentRunHandle, AgentRunOutcome, RunnerLogLine } from "../agent-types";
 
 function splitLines(buffer: { partial: string }, chunk: string): string[] {
   const combined = buffer.partial + chunk;
@@ -29,17 +12,27 @@ function splitLines(buffer: { partial: string }, chunk: string): string[] {
 }
 
 /**
- * Runs `claude -p "<instruction>"` with cwd = the task's project path.
- * The instruction is passed as a single argv element (never interpolated
- * into a shell string), so nothing in it can break out into a shell command.
+ * Claude, as either an implement/analyze agent or a reviewer — Claude is not
+ * pinned to one role. `permission` picks the CLI's permission mode:
+ * "write" -> acceptEdits (auto-accepts file edits), "read-only" -> plan
+ * (Claude reasons/reports but the CLI itself blocks actual edits).
+ *
+ * The instruction is always passed as a single argv element (never
+ * interpolated into a shell string), so nothing in it can break out into a
+ * shell command.
  */
-export function runClaude(
+export function runClaudeStep(
+  action: StepAction,
+  permission: StepPermission,
   instruction: string,
+  taskTitle: string,
   cwd: string,
   onLog: (line: RunnerLogLine) => void,
-): { handle: ClaudeRunHandle; result: Promise<ClaudeRunResult> } {
-  const args = ["-p", instruction, "--permission-mode", config.claudePermissionMode];
+): { handle: AgentRunHandle; result: Promise<AgentRunOutcome> } {
+  const prompt = action === "review" ? buildReviewPrompt(taskTitle, instruction) : instruction;
+  const permissionMode = permission === "write" ? config.claudePermissionMode : "plan";
 
+  const args = ["-p", prompt, "--permission-mode", permissionMode];
   const child = safeSpawn(config.claudeBin, args, { cwd });
 
   let cancelled = false;
@@ -54,7 +47,7 @@ export function runClaude(
     for (const line of splitLines(stdoutBuf, chunk)) {
       if (line.length === 0) continue;
       onLog({ stream: "stdout", text: line });
-      tailSummary = (tailSummary + "\n" + line).slice(-2000);
+      tailSummary = (tailSummary + "\n" + line).slice(-4000);
     }
   });
 
@@ -65,26 +58,53 @@ export function runClaude(
     }
   });
 
-  const result = new Promise<ClaudeRunResult>((resolve) => {
-    child.on("error", (err) => {
-      onLog({ stream: "stderr", text: `Claude CLI 실행 오류: ${err.message}` });
-      resolve({ exitCode: null, success: false, summary: tailSummary, cancelled });
-    });
-
-    child.on("close", (code) => {
+  const result = new Promise<AgentRunOutcome>((resolve) => {
+    const finish = (exitCode: number | null) => {
       if (stdoutBuf.partial) onLog({ stream: "stdout", text: stdoutBuf.partial });
       if (stderrBuf.partial) onLog({ stream: "stderr", text: stderrBuf.partial });
-      resolve({
-        exitCode: code,
-        success: !cancelled && code === 0,
-        summary: tailSummary.trim(),
-        cancelled,
-      });
+
+      const success = !cancelled && exitCode === 0;
+      const summary = tailSummary.trim() || null;
+
+      if (action !== "review") {
+        resolve({ exitCode, success, cancelled, summary, review: null });
+        return;
+      }
+
+      const parsed = success ? parseReviewJson(tailSummary) : null;
+      if (!parsed) {
+        resolve({
+          exitCode,
+          success,
+          cancelled,
+          summary,
+          review: success
+            ? {
+                result: "WARNING",
+                issues: [
+                  {
+                    severity: "high",
+                    file: "",
+                    message: "Claude 리뷰 응답에서 구조화된 결과를 파싱하지 못했습니다.",
+                  },
+                ],
+                raw: summary,
+              }
+            : null,
+        });
+        return;
+      }
+      resolve({ exitCode, success, cancelled, summary, review: parsed });
+    };
+
+    child.on("error", (err) => {
+      onLog({ stream: "stderr", text: `Claude CLI 실행 오류: ${err.message}` });
+      finish(null);
     });
+    child.on("close", (code) => finish(code));
   });
 
-  const handle: ClaudeRunHandle = {
-    process: child,
+  const handle: AgentRunHandle = {
     pid: child.pid,
     cancel: () => {
       cancelled = true;

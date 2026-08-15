@@ -11,10 +11,16 @@ function runGit(
   return new Promise((resolve) => {
     // execFile, never a shell string — args are passed as a real argv array,
     // so nothing in a branch name / path can be interpreted as shell syntax.
+    // `-c core.quotepath=false` is load-bearing for non-ASCII (e.g. Korean)
+    // filenames: git's default is to octal-escape any byte >= 0x80 in
+    // status/diff output (e.g. "\355\225\234\352\270\200.txt"), which would
+    // otherwise corrupt every Korean filename we show in the dashboard/diff.
+    // `encoding: "utf8"` is Node's default for execFile's callback form
+    // already, but is made explicit here rather than relied on implicitly.
     execFile(
       "git",
-      args,
-      { cwd, windowsHide: true, maxBuffer: 1024 * 1024 * 32 },
+      ["-c", "core.quotepath=false", ...args],
+      { cwd, windowsHide: true, maxBuffer: 1024 * 1024 * 32, encoding: "utf8" },
       (err, stdout, stderr) => {
         const code = (err as NodeJS.ErrnoException & { code?: number })?.code;
         resolve({
