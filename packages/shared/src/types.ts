@@ -42,7 +42,11 @@ export type ReviewIssueSeverity = "low" | "medium" | "high";
 export interface ReviewIssue {
   severity: ReviewIssueSeverity;
   file: string;
+  /** Best-effort line/location text the reviewing agent reported (e.g. "L42", "12-18"). Omitted when the agent wasn't confident. */
+  location?: string | null;
   message: string;
+  /** Best-effort concrete fix suggestion from the reviewing agent. Omitted when none was given. */
+  suggestion?: string | null;
 }
 
 /** Structured outcome of a `review`-action step. */
@@ -176,6 +180,14 @@ export interface TaskGitInfo {
   hadUncommittedChangesBeforeStart: boolean;
 }
 
+/**
+ * How a Task was derived from its `parentTaskId` — lets the Task Detail
+ * screen render the origin→follow-up chain (e.g. "T-1 원본 → T-2 리뷰 수정 →
+ * T-3 재검토") with an accurate label per hop. Only ever set at creation
+ * time; never changes afterward.
+ */
+export type TaskLinkKind = "fix_and_rereview" | "review_only" | "rerun";
+
 export interface Task {
   id: string;
   /** Short, human-friendly, permanent identifier (e.g. "T-1042"). Safe to use in chat/MCP/Dashboard instead of the UUID. */
@@ -193,6 +205,10 @@ export interface Task {
   logs: LogEntry[];
   error: string | null;
   gitInfo: TaskGitInfo | null;
+  /** Set when this Task was created as a WARNING follow-up of another Task (see TaskLinkKind). null for an original Task. */
+  parentTaskId: string | null;
+  /** Present only when parentTaskId is set — describes what kind of follow-up this is. */
+  linkKind: TaskLinkKind | null;
 
   /** @deprecated legacy fixed-pipeline fields — undefined/null on every new Task, populated only when a pre-workflow stored Task is loaded. Do not read these in new code; use `workflow.steps` instead. */
   claudeStatus?: RunnerStatus;
@@ -208,13 +224,17 @@ export interface Task {
 export type TaskListItem = Omit<Task, "logs">;
 
 export interface CreateTaskInput {
-  title: string;
+  /** Omit (or send empty) to have the server generate a title from `instruction` — see `generateTitleFromInstruction`. */
+  title?: string;
   projectPath: string;
   instruction: string;
   baseBranch?: string | null;
   branch?: string | null;
-  /** Omit to use Settings' default workflow. */
+  /** Omit to fall back to this project's last-remembered Workflow, then Settings' default. */
   workflow?: WorkflowSpec | null;
+  /** Set when this Task is a WARNING follow-up created from another Task. */
+  parentTaskId?: string | null;
+  linkKind?: TaskLinkKind | null;
 }
 
 export interface ChangedFile {
