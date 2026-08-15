@@ -1,0 +1,25 @@
+node_modules/
+dist/
+build/
+.next/
+out/
+*.log
+npm-debug.log*
+*.tsbuildinfo
+
+# server local data (task store, logs)
+apps/server/data/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# editor / os
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# test scratch repos
+scratch/

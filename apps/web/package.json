@@ -1,0 +1,32 @@
+{
+  "name": "@ai-task-router/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 9913",
+    "build": "next build",
+    "start": "next start -p 9913",
+    "typecheck": "tsc --noEmit",
+    "lint": "next lint --max-warnings=0"
+  },
+  "dependencies": {
+    "@ai-task-router/shared": "workspace:*",
+    "next": "^14.2.15",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^14.2.15",
+    "eslint-config-prettier": "^9.1.0",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13",
+    "typescript": "^5.6.3"
+  }
+}

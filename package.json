@@ -1,0 +1,27 @@
+{
+  "name": "ai-task-router",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local AI task router: parallel Claude CLI execution across projects with a web dashboard and a single Codex CLI review pass.",
+  "scripts": {
+    "postinstall": "pnpm --filter @ai-task-router/shared build",
+    "dev": "pnpm --parallel -r run dev",
+    "dev:server": "pnpm --filter @ai-task-router/server dev",
+    "dev:web": "pnpm --filter @ai-task-router/web dev",
+    "build": "pnpm -r run build",
+    "build:server": "pnpm --filter @ai-task-router/server build",
+    "build:web": "pnpm --filter @ai-task-router/web build",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "pnpm -r run lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18.18.0",
+    "pnpm": ">=9"
+  }
+}

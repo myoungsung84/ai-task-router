@@ -1,0 +1,17 @@
+node_modules
+dist
+build
+.next
+out
+coverage
+*.tsbuildinfo
+
+# generated/lockfiles
+pnpm-lock.yaml
+package-lock.json
+
+# local runtime data
+apps/server/data
+
+# scratch test repos
+scratch
