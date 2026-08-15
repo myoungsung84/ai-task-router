@@ -1,18 +1,23 @@
 import { v4 as uuid } from "uuid";
 import type {
   CreateTaskInput,
+  LogEntry,
   Task,
   TaskDiff,
   TaskListItem,
   WorkflowSpec,
 } from "@ai-task-router/shared";
+import { generateTitleFromInstruction } from "@ai-task-router/shared";
 import { taskStore } from "./task-store";
 import { activeRuns, cancelActiveRun, executeTask, isProjectPathBusy } from "./task-executor";
 import { validateProjectPath, normalizeForCompare } from "../projects/project-validator";
 import { getChangedFiles, getDiff, isGitRepository } from "../git/git-manager";
+import { getLastWorkflowForProject, recordProjectUsage } from "../projects/project-memory-store";
 import { allocateJobId } from "./job-id";
 import { buildWorkflowFromSpec } from "./workflow-builder";
 import { settingsService } from "../settings/settings-service";
+import { taskEventBus } from "../stream/event-bus";
+import { parseReviewJson } from "../runners/review-prompt";
 
 export class TaskServiceError extends Error {
   statusCode: number;
@@ -33,6 +38,19 @@ function requireTask(identifier: string): Task {
   return task;
 }
 
+/** Appends a system-source log line and publishes it over SSE — the same shape task-executor.ts's own emitLog produces, for actions (cancel-while-QUEUED, resolve-warning) that happen outside the executor. */
+function emitSystemLog(taskId: string, text: string): void {
+  const log: LogEntry = {
+    id: uuid(),
+    source: "system",
+    stream: "info",
+    text,
+    timestamp: new Date().toISOString(),
+  };
+  taskStore.appendLog(taskId, log);
+  taskEventBus.publish(taskId, { type: "log", log });
+}
+
 /**
  * Business logic layer. Deliberately framework-agnostic (no req/res here) so
  * both the REST routes and the MCP tools call the exact same functions.
@@ -41,17 +59,27 @@ function requireTask(identifier: string): Task {
  */
 export const taskService = {
   createTask(input: CreateTaskInput): Task {
-    const title = input.title?.trim();
     const instruction = input.instruction?.trim();
-    if (!title) throw new TaskServiceError("title은 필수입니다.");
     if (!instruction) throw new TaskServiceError("instruction은 필수입니다.");
+
+    // title is optional end-to-end (REST body, MCP run_task/run_tasks) —
+    // this is the one place that guarantees every stored Task has a
+    // non-empty title, whether the caller sent one or not.
+    const providedTitle = input.title?.trim();
+    const title = providedTitle || generateTitleFromInstruction(instruction);
 
     const validation = validateProjectPath(input.projectPath ?? "");
     if (!validation.ok || !validation.normalizedPath) {
       throw new TaskServiceError(validation.error ?? "projectPath가 올바르지 않습니다.");
     }
 
-    const spec: WorkflowSpec = input.workflow ?? settingsService.get().defaultWorkflow;
+    // Workflow precedence: explicit input (includes a WARNING follow-up
+    // passing its parent's Workflow along) > this project's last-remembered
+    // Workflow > Settings' default.
+    const spec: WorkflowSpec =
+      input.workflow ??
+      getLastWorkflowForProject(validation.normalizedPath) ??
+      settingsService.get().defaultWorkflow;
     if (!spec.steps || spec.steps.length === 0) {
       throw new TaskServiceError("workflow.steps는 최소 1개 이상이어야 합니다.");
     }
@@ -73,9 +101,12 @@ export const taskService = {
       logs: [],
       error: null,
       gitInfo: null,
+      parentTaskId: input.parentTaskId?.trim() || null,
+      linkKind: input.linkKind ?? null,
     };
 
     taskStore.create(task);
+    recordProjectUsage(validation.normalizedPath, spec);
     return task;
   },
 
@@ -129,8 +160,32 @@ export const taskService = {
     return taskStore.get(task.id)!;
   },
 
+  /**
+   * QUEUED has no active process yet — cancelling it is a pure state
+   * transition straight to CANCELLED (nothing to kill). RUNNING/REVIEWING
+   * go through the existing active-run kill path. Either way this is the
+   * only way to move a not-yet-terminal Task out of the way before it can
+   * be deleted (see deleteTask below).
+   */
   cancelTask(identifier: string): Task {
     const task = requireTask(identifier);
+
+    if (task.status === "QUEUED") {
+      const updated = taskStore.update(task.id, {
+        status: "CANCELLED",
+        completedAt: new Date().toISOString(),
+      });
+      if (updated) {
+        taskEventBus.publish(task.id, {
+          type: "status",
+          status: "CANCELLED",
+          workflow: updated.workflow,
+        });
+        emitSystemLog(task.id, "대기 중이던 작업을 취소했습니다.");
+      }
+      return updated!;
+    }
+
     if (task.status !== "RUNNING" && task.status !== "REVIEWING") {
       throw new TaskServiceError(`현재 상태(${task.status})는 취소할 수 없습니다.`, 409);
     }
@@ -141,13 +196,106 @@ export const taskService = {
     return taskStore.get(task.id)!;
   },
 
-  /** Deletes a completed Task's stored JSON + logs. RUNNING/REVIEWING tasks cannot be deleted (cancel first). Markdown history is left untouched — it's the permanent record. */
+  /**
+   * Deletes a Task's stored JSON + logs. QUEUED/RUNNING/REVIEWING tasks
+   * cannot be deleted directly — QUEUED has to be cancelled first (see
+   * cancelTask above) and RUNNING/REVIEWING has to be stopped first, so a
+   * running process's data can never be removed out from under it. Markdown
+   * history is left untouched — it's the permanent record.
+   */
   deleteTask(identifier: string): void {
     const task = requireTask(identifier);
-    if (task.status === "RUNNING" || task.status === "REVIEWING") {
-      throw new TaskServiceError("실행 중인 Task는 삭제할 수 없습니다. 먼저 중단하세요.", 409);
+    if (task.status === "QUEUED" || task.status === "RUNNING" || task.status === "REVIEWING") {
+      throw new TaskServiceError(
+        "대기 중이거나 실행 중인 Task는 바로 삭제할 수 없습니다. 먼저 취소하세요.",
+        409,
+      );
     }
     taskStore.delete(task.id);
+  },
+
+  /**
+   * "검토 후 완료 처리" — the user has read the review issues (any
+   * severity — low/medium/high) and decided the result is acceptable as-is,
+   * so force the WARNING Task straight to READY without creating a
+   * follow-up Task. Review issues and every Step's result are left exactly
+   * as they are; only `status` changes.
+   *
+   * This is deliberately NOT gated on issue severity (that was the old
+   * "낮은 심각도 무시" behavior) — the user is always the final judge of a
+   * genuine review outcome. What it *does* still refuse, unconditionally,
+   * is completing over a review that never produced a trustworthy result in
+   * the first place:
+   *   - a non-review (implement/analyze) Step failed
+   *   - a review Step's own process failed (status FAILED)
+   *   - a review Step "succeeded" but its output didn't actually parse — the
+   *     runners fall back to a synthetic single-issue WARNING in that case
+   *     (see claude-runner.ts / codex-runner.ts), which looks like a normal
+   *     review outcome unless re-checked; re-running parseReviewJson on the
+   *     stored `raw` text is the same check the runners used, so it
+   *     reliably tells a genuine parsed result apart from that fallback
+   *     without matching on message text.
+   *   - no review Step actually ran at all
+   * The client approximates these same conditions to decide whether to show
+   * the button, but this is the authoritative check — the wire endpoint
+   * (`POST /:id/resolve-warning`) and response shape are unchanged from the
+   * previous "낮은 심각도 무시" version, so existing callers keep working.
+   */
+  resolveWarning(identifier: string): Task {
+    const task = requireTask(identifier);
+    if (task.status !== "WARNING") {
+      throw new TaskServiceError(
+        `WARNING 상태에서만 사용할 수 있습니다 (현재: ${task.status}).`,
+        409,
+      );
+    }
+
+    const nonReviewSteps = task.workflow.steps.filter((s) => s.action !== "review");
+    if (nonReviewSteps.some((s) => s.status === "FAILED")) {
+      throw new TaskServiceError(
+        "구현/분석 Step이 실패해 완료 처리할 수 없습니다. 후속 Task로 다시 시도하세요.",
+        409,
+      );
+    }
+
+    const reviewSteps = task.workflow.steps.filter((s) => s.action === "review");
+    const ranReviewSteps = reviewSteps.filter(
+      (s) => s.status === "SUCCESS" || s.status === "FAILED",
+    );
+    if (ranReviewSteps.length === 0) {
+      throw new TaskServiceError(
+        "정상적으로 실행된 리뷰 결과가 없어 완료 처리할 수 없습니다.",
+        409,
+      );
+    }
+    const hasUnusableReview = ranReviewSteps.some((s) => {
+      if (s.status === "FAILED") return true;
+      const raw = s.result?.review?.raw;
+      return !raw || parseReviewJson(raw) === null;
+    });
+    if (hasUnusableReview) {
+      throw new TaskServiceError(
+        "리뷰 실행 자체가 실패했거나 결과를 구조화하지 못해 완료 처리할 수 없습니다. 후속 Task로 다시 시도하세요.",
+        409,
+      );
+    }
+
+    const updated = taskStore.update(task.id, { status: "READY" });
+    if (updated) {
+      taskEventBus.publish(task.id, {
+        type: "status",
+        status: "READY",
+        workflow: updated.workflow,
+      });
+      const issues = ranReviewSteps.flatMap((s) => s.result?.review?.issues ?? []);
+      emitSystemLog(
+        task.id,
+        issues.length > 0
+          ? `사용자가 리뷰 이슈 ${issues.length}건을 확인하고 완료 처리했습니다.`
+          : "사용자가 리뷰 결과를 확인하고 완료 처리했습니다.",
+      );
+    }
+    return updated!;
   },
 
   getTask(identifier: string): Task | undefined {

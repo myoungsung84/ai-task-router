@@ -61,7 +61,18 @@ export class TaskStore {
       const workflow = record.workflow ?? buildLegacyWorkflow(record);
       const jobId = record.jobId ?? allocateJobId();
       const logs = this.readLogsFromDisk(id);
-      const task: Task = { ...record, id, jobId, workflow, logs } as Task;
+      // parentTaskId/linkKind are additive fields — default them for any
+      // Task stored before they existed, same spirit as the legacy
+      // claudeStatus/codexStatus handling above.
+      const task: Task = {
+        parentTaskId: null,
+        linkKind: null,
+        ...record,
+        id,
+        jobId,
+        workflow,
+        logs,
+      } as Task;
 
       this.tasks.set(id, task);
       this.jobIdIndex.set(jobId, id);

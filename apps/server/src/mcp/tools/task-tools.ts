@@ -79,7 +79,7 @@ export function registerTaskTools(server: McpServer): void {
     {
       title: "Run Task",
       description:
-        "새 Task를 생성하고 즉시 실행한다. Claude/Codex 작업 완료를 기다리지 않고 taskId/jobId를 바로 반환한다. workflow를 생략하면 Settings의 기본 Workflow를 사용한다.",
+        "새 Task를 생성하고 즉시 실행한다. Claude/Codex 작업 완료를 기다리지 않고 taskId/jobId를 바로 반환한다. title을 생략하면 instruction으로부터 자동 생성된다. workflow를 생략하면 이 프로젝트의 마지막 Workflow, 그마저 없으면 Settings의 기본 Workflow를 사용한다.",
       inputSchema: taskSpecShape,
     },
     async (args) => {
@@ -211,7 +211,7 @@ export function registerTaskTools(server: McpServer): void {
     {
       title: "Cancel Task",
       description:
-        "실행 중(RUNNING/REVIEWING)인 Task를 중단한다. 해당 Task의 프로세스만 종료되며 다른 Task에는 영향이 없다.",
+        "대기 중(QUEUED)이거나 실행 중(RUNNING/REVIEWING)인 Task를 취소한다. QUEUED는 즉시 CANCELLED로 전이되고, RUNNING/REVIEWING은 해당 Task의 프로세스만 종료된다(다른 Task에는 영향 없음).",
       inputSchema: { taskId: z.string().min(1).describe(TASK_ID_DESCRIPTION) },
     },
     (args) => {

@@ -74,6 +74,12 @@ taskRouter.post("/:id/cancel", (req, res) => {
   res.json(task);
 });
 
+// "검토 후 완료 처리" — WARNING-only, see taskService.resolveWarning for the full eligibility check.
+taskRouter.post("/:id/resolve-warning", (req, res) => {
+  const task = taskService.resolveWarning(requireIdParam(req));
+  res.json(task);
+});
+
 // Completed-task cleanup (Settings/History UX) — RUNNING/REVIEWING tasks are
 // rejected by taskService.deleteTask, never force-removed.
 taskRouter.delete("/:id", (req, res) => {

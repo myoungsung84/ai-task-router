@@ -63,17 +63,41 @@ export function runCodexStep(
   child.stdout?.setEncoding("utf8");
   child.stderr?.setEncoding("utf8");
 
+  // Best-effort extraction of a human-readable message out of a `type:
+  // "error"` / `type: "turn.failed"` event — the exact shape isn't
+  // guaranteed across Codex CLI versions (top-level `message`, a string
+  // `error`, or a nested `error.message` have all been observed), so this
+  // tries the plausible spots in order and, failing that, falls back to the
+  // raw event JSON rather than silently losing the failure reason.
+  function extractEventErrorMessage(parsed: Record<string, unknown>): string {
+    if (typeof parsed.message === "string" && parsed.message) return parsed.message;
+    const err = parsed.error;
+    if (typeof err === "string" && err) return err;
+    if (err && typeof err === "object") {
+      const msg = (err as Record<string, unknown>).message;
+      if (typeof msg === "string" && msg) return msg;
+    }
+    return JSON.stringify(parsed);
+  }
+
   // `codex exec --json` emits one JSON event per line (thread.started,
   // turn.started, item.started/item.completed for each tool call or agent
-  // message, turn.completed). We turn the ones worth showing into a
-  // human-readable log line and remember the latest agent_message text as
-  // the run's summary; anything unrecognized falls back to the raw line so
-  // nothing is silently dropped.
+  // message, turn.completed, and on failure `error`/`turn.failed`). We turn
+  // the ones worth showing into a human-readable log line and remember the
+  // latest agent_message text as the run's summary. A line that fails to
+  // parse as JSON at all falls back to the raw line; a line that parses but
+  // has a `type` we don't otherwise recognize is intentionally dropped
+  // (`turn.completed`'s usage-stats payload, mainly) — `error`/`turn.failed`
+  // are explicitly handled below precisely so *they* are never dropped.
   const emitJsonLine = (line: string) => {
     if (!line.trim()) return;
     let friendly: string | null = null;
+    let stream: "stdout" | "stderr" = "stdout";
     try {
-      const parsed = JSON.parse(line) as { type?: string; item?: Record<string, unknown> };
+      const parsed = JSON.parse(line) as Record<string, unknown> & {
+        type?: string;
+        item?: Record<string, unknown>;
+      };
       const item = parsed.item;
       if (parsed.type === "item.started" && item?.type === "command_execution") {
         friendly = `$ ${String(item.command ?? "").slice(0, 300)}`;
@@ -86,11 +110,17 @@ export function runCodexStep(
         friendly = "Codex 턴을 시작합니다...";
       } else if (parsed.type === "turn.completed") {
         friendly = null; // usage stats only — not worth a log line
+      } else if (parsed.type === "error") {
+        friendly = `Codex 오류: ${extractEventErrorMessage(parsed)}`;
+        stream = "stderr";
+      } else if (parsed.type === "turn.failed") {
+        friendly = `Codex 턴 실패: ${extractEventErrorMessage(parsed)}`;
+        stream = "stderr";
       }
     } catch {
       friendly = line; // not JSON (or a partial line) — show it verbatim
     }
-    if (friendly) onLog({ stream: "stdout", text: friendly });
+    if (friendly) onLog({ stream, text: friendly });
   };
 
   child.stdout?.on("data", (chunk: string) => {
