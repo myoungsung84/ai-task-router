@@ -58,8 +58,9 @@ export function TaskCleanup() {
   return (
     <Card title="완료 Task 정리">
       <p className="mb-3 text-xs text-[#8291a3]">
-        완료/취소/실패한 Task를 선택해 삭제합니다. 실행 중인 Task는 삭제할 수 없습니다(먼저
-        중단하세요). 삭제해도 Markdown History는 남습니다.
+        완료/확인 필요/취소/실패한 Task를 선택해 삭제합니다. 대기 중이거나 실행 중인 Task는 목록에
+        나타나지 않습니다 — 대시보드에서 먼저 취소(대기 중) 또는 중단(실행 중)한 뒤 다시 확인하세요.
+        삭제해도 Markdown History는 남습니다.
       </p>
       {loading ? (
         <p className="text-sm text-[#8291a3]">불러오는 중...</p>

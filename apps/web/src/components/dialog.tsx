@@ -29,7 +29,7 @@ export function Dialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 pt-[8vh]">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 pt-[5vh]">
       <button
         aria-label="닫기"
         className="fixed inset-0 cursor-default"
@@ -55,7 +55,7 @@ export function Dialog({
             ✕
           </button>
         </div>
-        <div className="max-h-[75vh] overflow-y-auto p-4">{children}</div>
+        <div className="max-h-[88vh] overflow-y-auto p-4">{children}</div>
       </div>
     </div>
   );

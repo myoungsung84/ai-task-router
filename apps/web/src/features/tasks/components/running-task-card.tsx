@@ -7,6 +7,7 @@ import { cn, formatDuration, projectName } from "@/lib/format";
 import { TaskStatusBadge } from "./task-status-badge";
 import { WorkflowTimeline } from "./workflow-timeline";
 import { useTask } from "../hooks/use-task";
+import { useNowTick } from "../hooks/use-now-tick";
 import type { TaskListItem } from "../types";
 
 /**
@@ -18,21 +19,32 @@ import type { TaskListItem } from "../types";
 export function RunningTaskCard({
   task: listTask,
   onCancelClick,
+  onStartClick,
+  starting = false,
 }: {
   task: TaskListItem;
   onCancelClick: (task: TaskListItem) => void;
+  onStartClick?: (task: TaskListItem) => void;
+  starting?: boolean;
 }) {
   const { task: live } = useTask(listTask.id);
   const task = live ?? listTask;
   const activeStep = task.workflow.steps.find((s) => s.status === "RUNNING");
-  const cancellable = task.status === "RUNNING" || task.status === "REVIEWING";
+  const isQueued = task.status === "QUEUED";
+  const cancellable = task.status === "RUNNING" || task.status === "REVIEWING" || isQueued;
   const recentLogs = live ? live.logs.filter((l) => l.source !== "system").slice(-2) : [];
+
+  // Forces a re-render every second while genuinely active, so the
+  // elapsed-duration readout below keeps moving between log lines — a real
+  // timestamp diff (formatDuration falls back to Date.now()), not a
+  // simulated progress indicator.
+  useNowTick(task.status === "RUNNING" || task.status === "REVIEWING");
 
   return (
     <Card
       className={cn(
         "border-blue-500/20",
-        cancellable && "shadow-[0_0_0_1px_rgba(59,130,246,0.15)]",
+        cancellable && !isQueued && "shadow-[0_0_0_1px_rgba(59,130,246,0.15)]",
       )}
     >
       <div className="flex items-start justify-between gap-3">
@@ -56,11 +68,22 @@ export function RunningTaskCard({
           <div className="mono text-xs text-[#8291a3]">
             {formatDuration(task.startedAt, task.completedAt)}
           </div>
-          {cancellable ? (
-            <Button variant="danger" className="mt-2" onClick={() => onCancelClick(listTask)}>
-              중단
-            </Button>
-          ) : null}
+          <div className="mt-2 flex justify-end gap-2">
+            {isQueued && onStartClick ? (
+              <Button
+                variant="secondary"
+                onClick={() => onStartClick(listTask)}
+                disabled={starting}
+              >
+                {starting ? "실행 중..." : "실행"}
+              </Button>
+            ) : null}
+            {cancellable ? (
+              <Button variant="danger" onClick={() => onCancelClick(listTask)}>
+                {isQueued ? "취소" : "중단"}
+              </Button>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -68,7 +91,11 @@ export function RunningTaskCard({
         <WorkflowTimeline workflow={task.workflow} compact />
       </div>
 
-      {recentLogs.length > 0 ? (
+      {isQueued ? (
+        <p className="mt-2 text-xs text-[#8291a3]">
+          접수되어 실행을 기다리고 있습니다. “실행”을 누르면 바로 시작합니다.
+        </p>
+      ) : recentLogs.length > 0 ? (
         <div className="mt-2 space-y-0.5 border-t border-[#232c38] pt-2">
           {recentLogs.map((log) => (
             <p key={log.id} className="mono truncate text-xs text-[#8291a3]">

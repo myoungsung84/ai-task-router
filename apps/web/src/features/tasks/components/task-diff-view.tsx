@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Card } from "@/components/card";
 import { Button } from "@/components/button";
+import { CopyButton } from "@/components/copy-button";
 import { tasksApi } from "../api/tasks-api";
 import type { TaskDiff } from "../types";
 
@@ -38,11 +39,14 @@ export function TaskDiffView({
   return (
     <Card
       title={
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <span>변경 파일 / git diff</span>
-          <Button variant="ghost" onClick={() => void load()} disabled={loading}>
-            새로고침
-          </Button>
+          <div className="flex items-center gap-2">
+            <CopyButton text={diff?.diff} label="diff 복사" />
+            <Button variant="ghost" onClick={() => void load()} disabled={loading}>
+              새로고침
+            </Button>
+          </div>
         </div>
       }
     >

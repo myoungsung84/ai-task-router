@@ -10,8 +10,17 @@ const SOURCE_LABEL: Record<LogSource, string> = {
   codex: "Codex",
 };
 
-export function TaskLogPanel({ logs, source }: { logs: LogEntry[]; source: LogSource }) {
-  const filtered = logs.filter((l) => l.source === source);
+/** `source` omitted (or "all") shows every log line, unfiltered, in the order they happened. */
+export function TaskLogPanel({
+  logs,
+  source,
+  title,
+}: {
+  logs: LogEntry[];
+  source?: LogSource | "all";
+  title?: string;
+}) {
+  const filtered = !source || source === "all" ? logs : logs.filter((l) => l.source === source);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -19,8 +28,10 @@ export function TaskLogPanel({ logs, source }: { logs: LogEntry[]; source: LogSo
     if (el) el.scrollTop = el.scrollHeight;
   }, [filtered.length]);
 
+  const heading = title ?? `[${source && source !== "all" ? SOURCE_LABEL[source] : "전체"}]`;
+
   return (
-    <Card title={`[${SOURCE_LABEL[source]}]`} className="flex flex-col">
+    <Card title={heading} className="flex flex-col">
       <div
         ref={scrollRef}
         className="mono h-72 overflow-y-auto rounded-md bg-black/30 p-3 text-xs leading-relaxed"
@@ -39,6 +50,9 @@ export function TaskLogPanel({ logs, source }: { logs: LogEntry[]; source: LogSo
               <span className="text-[#546274]">
                 {new Date(log.timestamp).toLocaleTimeString()}{" "}
               </span>
+              {!source || source === "all" ? (
+                <span className="mr-1 text-[#546274]">[{SOURCE_LABEL[log.source]}]</span>
+              ) : null}
               {log.text}
             </div>
           ))

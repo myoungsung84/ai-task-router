@@ -48,6 +48,9 @@ export const tasksApi = {
     request<Task>("/api/tasks", { method: "POST", body: JSON.stringify(input) }),
   start: (id: string) => request<Task>(`/api/tasks/${id}/start`, { method: "POST" }),
   cancel: (id: string) => request<Task>(`/api/tasks/${id}/cancel`, { method: "POST" }),
+  /** "검토 후 완료 처리" — WARNING-only; rejected server-side if the review process itself failed/didn't parse or an implement/analyze Step failed. */
+  resolveWarning: (id: string) =>
+    request<Task>(`/api/tasks/${id}/resolve-warning`, { method: "POST" }),
   /** Deletes a completed Task's JSON/logs. RUNNING/REVIEWING tasks are rejected server-side. */
   remove: (id: string) => requestNoContent(`/api/tasks/${id}`, { method: "DELETE" }),
   diff: (id: string) => request<TaskDiff>(`/api/tasks/${id}/diff`),

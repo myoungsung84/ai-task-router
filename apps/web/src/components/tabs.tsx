@@ -3,14 +3,26 @@
 import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/format";
 
+/**
+ * Uncontrolled by default (`defaultValue`, internal state) — pass
+ * `value`/`onValueChange` to control the active tab from outside (used by
+ * TaskDetail so the WARNING banner's "리뷰 보기" button can jump to the
+ * review tab).
+ */
 export function Tabs({
   tabs,
   defaultValue,
+  value,
+  onValueChange,
 }: {
   tabs: { value: string; label: string; content: ReactNode }[];
   defaultValue?: string;
+  value?: string;
+  onValueChange?: (value: string) => void;
 }) {
-  const [active, setActive] = useState(defaultValue ?? tabs[0]?.value);
+  const [internalActive, setInternalActive] = useState(defaultValue ?? tabs[0]?.value);
+  const active = value ?? internalActive;
+  const setActive = onValueChange ?? setInternalActive;
   return (
     <div>
       <div className="flex gap-1 border-b border-[#232c38]">

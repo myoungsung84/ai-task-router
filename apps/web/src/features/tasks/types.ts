@@ -26,7 +26,13 @@ export type {
   ChangedFile,
   TaskDiff,
   TaskEvent,
+  TaskLinkKind,
   Settings,
 } from "@ai-task-router/shared";
 
-export { WORKFLOW_PRESETS, statusGroupOf, isTerminalStatus } from "@ai-task-router/shared";
+export {
+  WORKFLOW_PRESETS,
+  statusGroupOf,
+  isTerminalStatus,
+  generateTitleFromInstruction,
+} from "@ai-task-router/shared";
