@@ -1,5 +1,5 @@
 import { SERVER_URL } from "@/lib/config";
-import type { Settings, WorkflowSpec } from "@ai-task-router/shared";
+import type { RoleSettings, Settings } from "@ai-task-router/shared";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${SERVER_URL}${path}`, {
@@ -22,9 +22,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const settingsApi = {
   get: () => request<Settings>("/api/settings"),
-  updateDefaultWorkflow: (defaultWorkflow: WorkflowSpec) =>
-    request<Settings>("/api/settings/default-workflow", {
-      method: "PUT",
-      body: JSON.stringify({ defaultWorkflow }),
-    }),
+  updateRoles: (roles: RoleSettings) =>
+    request<Settings>("/api/settings/roles", { method: "PUT", body: JSON.stringify({ roles }) }),
 };

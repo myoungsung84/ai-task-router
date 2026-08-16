@@ -27,12 +27,13 @@ export function TaskActivityLog({ logs }: { logs: LogEntry[] }) {
 
   return (
     <div className="space-y-3">
-      <div className="inline-flex flex-wrap rounded-lg border border-[#232c38] bg-[#0e131a] p-1">
+      <div className="flex flex-wrap gap-1">
         <button
+          type="button"
           onClick={() => setFilter("all")}
           className={cn(
-            "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-            filter === "all" ? "bg-white/10 text-white" : "text-[#8291a3] hover:text-white",
+            "h-7 rounded-md px-2.5 text-xs font-medium transition-colors duration-fast",
+            filter === "all" ? "bg-fg/10 text-fg" : "bg-fg/[0.04] text-fg-muted hover:text-fg",
           )}
         >
           전체
@@ -40,10 +41,11 @@ export function TaskActivityLog({ logs }: { logs: LogEntry[] }) {
         {present.map((s) => (
           <button
             key={s}
+            type="button"
             onClick={() => setFilter(s)}
             className={cn(
-              "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-              filter === s ? "bg-white/10 text-white" : "text-[#8291a3] hover:text-white",
+              "h-7 rounded-md px-2.5 text-xs font-medium transition-colors duration-fast",
+              filter === s ? "bg-fg/10 text-fg" : "bg-fg/[0.04] text-fg-muted hover:text-fg",
             )}
           >
             {SOURCE_LABEL[s]}

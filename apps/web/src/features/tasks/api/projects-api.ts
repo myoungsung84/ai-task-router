@@ -1,5 +1,4 @@
 import { SERVER_URL } from "@/lib/config";
-import type { WorkflowSpec } from "../types";
 
 async function request<T>(path: string): Promise<T> {
   const res = await fetch(`${SERVER_URL}${path}`, { cache: "no-store" });
@@ -26,7 +25,6 @@ export interface ProjectValidation {
   exists: boolean;
   isGitRepo: boolean;
   normalizedPath?: string;
-  lastWorkflow?: WorkflowSpec | null;
   error?: string;
 }
 

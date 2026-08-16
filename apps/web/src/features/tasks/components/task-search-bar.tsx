@@ -1,8 +1,7 @@
-const inputClass =
-  "w-full rounded-md border border-[#232c38] bg-[#0e131a] px-3 py-2 text-sm text-white placeholder:text-[#546274] focus:border-blue-500 focus:outline-none";
-const selectClass =
-  "rounded-md border border-[#232c38] bg-[#0e131a] px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none";
+import { Search } from "lucide-react";
+import { SelectMenu } from "@/components/select-menu";
 
+/** Search + project filter, both at the standard 36px control height so they line up with the status filter across the toolbar row. */
 export function TaskSearchBar({
   search,
   onSearchChange,
@@ -17,25 +16,32 @@ export function TaskSearchBar({
   projectOptions: string[];
 }) {
   return (
-    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-      <input
-        className={inputClass}
-        placeholder="검색: Job ID, 제목, 프로젝트, branch (예: T-1042)"
-        value={search}
-        onChange={(e) => onSearchChange(e.target.value)}
-      />
-      <select
-        className={selectClass}
-        value={project}
-        onChange={(e) => onProjectChange(e.target.value)}
-      >
-        <option value="">모든 프로젝트</option>
-        {projectOptions.map((p) => (
-          <option key={p} value={p}>
-            {p}
-          </option>
-        ))}
-      </select>
+    <div className="flex items-center gap-2">
+      <div className="relative min-w-0 flex-1 sm:w-56 sm:flex-none">
+        <Search
+          className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-muted"
+          aria-hidden
+        />
+        <input
+          className="h-9 w-full rounded-md border border-border bg-fg/[0.03] pl-9 pr-3 text-sm text-fg placeholder:text-fg-faint transition-colors duration-fast hover:border-border-strong focus:border-brand focus:outline-none focus:ring-2 focus:ring-focus/40"
+          placeholder="제목, 경로, 브랜치 검색"
+          aria-label="작업 검색"
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+        />
+      </div>
+      {projectOptions.length > 0 ? (
+        <SelectMenu
+          label="프로젝트 필터"
+          value={project}
+          onChange={onProjectChange}
+          placeholder="모든 프로젝트"
+          options={[
+            { value: "", label: "모든 프로젝트" },
+            ...projectOptions.map((p) => ({ value: p, label: p })),
+          ]}
+        />
+      ) : null}
     </div>
   );
 }

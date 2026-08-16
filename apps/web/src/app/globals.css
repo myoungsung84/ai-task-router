@@ -2,20 +2,194 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Design tokens — single source of truth for color in this app. Every
+ * component reads these (via the Tailwind semantic classes configured in
+ * tailwind.config.ts, e.g. `bg-surface`, `text-fg-muted`, `border-warning/40`)
+ * instead of raw hex or Tailwind's default palette (`bg-[#121821]`,
+ * `text-blue-300`, ...), so re-theming means editing values here, not
+ * hunting through every screen.
+ *
+ * Values are "R G B" triples (not `#rrggbb` / `hsl()`) specifically so
+ * Tailwind's `<alpha-value>` mechanism works — `bg-brand/10`,
+ * `border-warning/40`, etc. all resolve to `rgb(R G B / alpha)` at build
+ * time. This is also how most subtle fills/borders in this app are built:
+ * one base color per semantic role, used at different opacities, rather
+ * than a separate "-bg" / "-border" token per state.
+ *
+ * Dark is the only theme actually in use today (`:root` below), but every
+ * value already goes through a token — adding a real light theme later is
+ * "define `:root[data-theme='light']`", not "touch every component".
+ */
+:root {
+  /* Dark is also the no-attribute fallback, so a page rendered before the
+     theme script runs (or with JS off) is still coherent rather than
+     half-styled. `color-scheme` keeps native bits — scrollbars, checkboxes,
+     form autofill — in step with the token palette. */
+  color-scheme: dark;
+
+  /* Surfaces */
+  --bg: 11 15 20; /* page background */
+  --surface: 18 24 33; /* card / panel / row background */
+  --surface-raised: 26 34 46; /* dialog / dropdown / popover — one step up from surface */
+  --surface-sunken: 9 13 18; /* inset areas: log/diff panes, code blocks */
+
+  /* Borders */
+  --border: 35 44 56; /* default border */
+  --border-strong: 51 64 79; /* hover / focus-adjacent border */
+
+  /* Text */
+  /* Text — four steps, each still readable on --bg. The floor is
+     ~4.5:1 against the page background: this app's "least important"
+     text is still real information (timestamps, paths, counts), so
+     nothing here is allowed to fade into decoration. */
+  --fg: 230 237 243; /* primary text — titles, values */
+  --fg-secondary: 203 212 222; /* body copy, descriptions */
+  --fg-muted: 148 162 179; /* metadata, labels, captions, placeholders */
+  --fg-faint: 116 130 148; /* the quietest tier — timestamps, separators, disabled */
+
+  /* Brand / focus */
+  --brand: 59 130 246; /* primary actions, links, RUNNING */
+  --brand-strong: 37 99 235; /* primary button hover */
+  --focus: 96 165 250; /* focus ring — deliberately a touch lighter than --brand for contrast on brand-colored controls too */
+
+  /* Status */
+  --success: 52 211 153;
+  --success-strong: 16 185 129;
+  --warning: 251 191 36;
+  --warning-strong: 217 119 6;
+  --danger: 248 113 113;
+  --danger-strong: 220 38 38;
+  --info: 96 165 250;
+  --reviewing: 192 132 252; /* the one status (REVIEWING) that isn't success/warning/danger/info/neutral */
+  --neutral: 148 163 184;
+
+  /* Agent identity — paired with an icon + label everywhere, never color alone */
+  --agent-claude: 217 119 87; /* warm clay/terracotta */
+  --agent-codex: 45 179 173; /* teal */
+
+  /*
+   * Shape — deliberately restrained. A fully rounded (pill) shape is NOT
+   * the house style; it is reserved for the two things that genuinely read
+   * as "a token, not a box": `Badge` (status/severity/count chips) and the
+   * segmented status filter. Everything else — buttons, inputs, list rows,
+   * menu items, cards, panels, dialogs — uses one of the four steps below,
+   * so the app reads as a tool rather than a toy.
+   *
+   * Pick by size, not by importance:
+   *   sm  a control smaller than ~24px tall, or nested inside an md box
+   *   md  every standard control: button, input, select, list row, menu item
+   *   lg  a grouping surface: card, section panel, log/diff pane
+   *   xl  a floating layer: dialog, popover panel
+   */
+  --radius-sm: 0.25rem; /* 4px */
+  --radius-md: 0.375rem; /* 6px */
+  --radius-lg: 0.5rem; /* 8px */
+  --radius-xl: 0.75rem; /* 12px */
+
+  /*
+   * Spacing — the app uses Tailwind's own 4px scale, but only these steps,
+   * so vertical rhythm is comparable across screens instead of every
+   * component inventing its own margin:
+   *   1  (4px)   icon↔label, chip internals
+   *   2  (8px)   inside a control, between two adjacent controls
+   *   3  (12px)  between tightly related items (list row internals)
+   *   4  (16px)  between related blocks inside one section
+   *   6  (24px)  between blocks within a section / card padding
+   *   8  (32px)  between sections
+   *   12 (48px)  between top-level page regions
+   * Odd half-steps (2.5/3.5/…) are avoided except for optical alignment of
+   * an icon against text.
+   *
+   * Control heights are equally fixed — `h-8` (32px) for compact/secondary
+   * controls, `h-9` (36px) for every standard form control and button,
+   * `h-10` (40px) for a dialog's primary action. A row of controls must
+   * never mix heights.
+   */
+
+  /* Elevation */
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-md: 0 8px 24px -4px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 16px 40px -8px rgb(0 0 0 / 0.5);
+
+  /* Motion */
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+}
+
+/*
+ * Light theme. `data-theme` is written onto <html> before first paint by the
+ * inline script in `lib/theme.ts` (stored choice, else the OS preference), so
+ * a reload never flashes the wrong palette. Every component reads tokens
+ * only, so switching is an attribute change and nothing else.
+ */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: 246 247 249;
+  --surface: 255 255 255;
+  --surface-raised: 255 255 255;
+  --surface-sunken: 237 239 242;
+
+  --border: 223 227 233;
+  --border-strong: 193 199 209;
+
+  --fg: 17 24 33;
+  --fg-secondary: 51 63 78;
+  /* Held to the same ≥4.5:1-on-`--bg` floor as the dark palette: light
+     themes make it very easy for "muted" to drift into unreadable. */
+  --fg-muted: 87 98 113;
+  --fg-faint: 99 110 126;
+
+  --brand: 37 99 235;
+  --brand-strong: 29 78 216;
+  --focus: 37 99 235;
+
+  --success: 5 150 105;
+  --success-strong: 4 120 87;
+  --warning: 180 83 9;
+  --warning-strong: 146 64 14;
+  --danger: 220 38 38;
+  --danger-strong: 185 28 28;
+  --info: 37 99 235;
+  --reviewing: 147 51 234;
+  --neutral: 100 116 139;
+
+  --agent-claude: 194 92 62;
+  --agent-codex: 13 133 128;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.06);
+  --shadow-md: 0 8px 24px -4px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 16px 40px -8px rgb(0 0 0 / 0.16);
+}
+
 html,
 body {
-  background-color: #0b0f14;
-  color: #e6edf3;
+  background-color: rgb(var(--bg));
+  color: rgb(var(--fg));
 }
 
 body {
+  /* `--font-sans` is set on <html> by next/font/local to Pretendard
+     Variable (see src/lib/fonts.ts) — this rule is the fallback path for
+     the moment before that class is present (or if the font somehow fails
+     to load), using the same stack the app used before Pretendard. */
   font-family:
+    var(--font-sans),
     ui-sans-serif,
     system-ui,
     -apple-system,
     "Segoe UI",
     Roboto,
     sans-serif;
+  /* Pretendard's metrics already read comfortably at the default tracking
+     for Korean; a hair of negative letter-spacing is the commonly
+     recommended touch that keeps mixed Korean/Latin runs (e.g. "Task를",
+     file paths inline in prose) from feeling loose without visibly
+     cramping either script on its own. */
+  letter-spacing: -0.011em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 ::-webkit-scrollbar {
@@ -23,15 +197,21 @@ body {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background-color: #2a3441;
+  background-color: rgb(var(--border-strong));
   border-radius: 6px;
 }
 ::-webkit-scrollbar-track {
   background-color: transparent;
 }
 
+/* Monospace is reserved for machine-shaped values only — file paths,
+   branch names, Job IDs, model ids, log/diff bodies. Prose, labels and
+   counts stay in Pretendard. `tabular-nums` keeps durations and counts
+   from shifting horizontally as they tick. */
 .mono {
   font-family: ui-monospace, SFMono-Regular, "Cascadia Code", Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
 }
 
 /* Small, purposeful motion for "an agent is actually working" — kept subtle
@@ -48,6 +228,29 @@ body {
     opacity: 1;
     transform: translateY(-2px);
   }
+}
+
+/* Applied to <html> for one frame while the theme attribute is swapped —
+   see `applyTheme` in lib/theme.ts for why this is required and not just a
+   polish detail. */
+.theme-switching *,
+.theme-switching *::before,
+.theme-switching *::after {
+  transition: none !important;
+}
+
+/* Theme-conditional icons. The theme toggle ships both glyphs and lets CSS
+   pick, rather than choosing in React after mount — `data-theme` is already
+   on <html> before first paint, so the correct icon is painted immediately
+   with no swap once hydration catches up. */
+.icon-when-light {
+  display: none;
+}
+:root[data-theme="light"] .icon-when-light {
+  display: block;
+}
+:root[data-theme="light"] .icon-when-dark {
+  display: none;
 }
 
 .typing-dot {
@@ -72,9 +275,24 @@ body {
   animation: scan-sweep 1.6s ease-in-out infinite;
 }
 
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-in-up {
+  animation: fade-in-up var(--duration-base) ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .typing-dot,
-  .scan-sweep {
+  .scan-sweep,
+  .animate-fade-in-up {
     animation: none !important;
   }
 }

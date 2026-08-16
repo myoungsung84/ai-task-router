@@ -2,37 +2,62 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Plus, Settings2 } from "lucide-react";
 import { NewTaskModal } from "@/features/tasks/components/new-task-modal";
+import { BrandMark } from "@/components/brand-mark";
+import { Button } from "@/components/button";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { cn } from "@/lib/format";
 
 /**
- * Single New Task entry point, available from every route via the layout.
- * Opens the same creation modal the dashboard used to embed inline —
- * that inline copy was removed so there is exactly one place to start a
- * Task (see features/tasks/components/task-list.tsx).
+ * Single 새 작업 entry point, available from every route, plus the app's two
+ * global controls (theme, settings). A hairline bottom border rather than a
+ * shadow or a raised bar — the header's job is to hold the page's left edge
+ * and its primary action, not to announce itself.
+ *
+ * The right-hand cluster runs quiet → loud: two 36px icon buttons (theme,
+ * settings) then the one filled action. All three share the same height, so
+ * the cluster reads as a single row rather than three separate widgets.
  */
 export function AppHeader() {
   const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const pathname = usePathname();
+  const onSettings = pathname.startsWith("/settings");
 
   return (
-    <header className="border-b border-[#232c38] bg-[#0e131a]">
-      <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-        <Link href="/" className="font-semibold tracking-tight text-white">
+    <header className="sticky top-0 z-30 border-b border-border bg-bg/85 backdrop-blur">
+      <div className="mx-auto flex h-14 w-full max-w-content items-center justify-between gap-3 px-4 sm:px-6">
+        <Link
+          href="/"
+          className="flex items-center gap-2 rounded-md text-sm font-semibold tracking-tight text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        >
+          <BrandMark size={20} />
           AI Task Router
         </Link>
-        <nav className="flex flex-wrap items-center gap-4 text-sm text-[#8291a3]">
-          <Link href="/" className="hover:text-white">
-            Tasks
-          </Link>
-          <Link href="/settings" className="hover:text-white">
-            Settings
-          </Link>
-          <button
-            onClick={() => setNewTaskOpen(true)}
-            className="rounded-md bg-white/10 px-3 py-1.5 text-white hover:bg-white/20"
+        <div className="flex items-center gap-1">
+          <ThemeToggle />
+          <Link
+            href="/settings"
+            aria-label="설정"
+            title="설정"
+            className={cn(
+              "flex h-9 w-9 items-center justify-center rounded-md transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+              onSettings
+                ? "bg-fg/[0.08] text-fg"
+                : "text-fg-muted hover:bg-fg/[0.06] hover:text-fg",
+            )}
           >
-            + New Task
-          </button>
-        </nav>
+            <Settings2 className="h-4 w-4" aria-hidden />
+          </Link>
+          <Button
+            className="ml-1"
+            icon={<Plus className="h-4 w-4" />}
+            onClick={() => setNewTaskOpen(true)}
+          >
+            새 작업
+          </Button>
+        </div>
       </div>
       <NewTaskModal open={newTaskOpen} onClose={() => setNewTaskOpen(false)} />
     </header>

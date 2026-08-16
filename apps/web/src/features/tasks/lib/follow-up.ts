@@ -1,22 +1,38 @@
-import type { Task, TaskLinkKind, WorkflowStepSpec } from "../types";
+import type { RoleOverrideMap } from "../components/role-override-panel";
+import type { Task, TaskLinkKind, TaskPurpose } from "../types";
 
 export interface FollowUpPrefill {
-  title: string;
   projectPath: string;
   instruction: string;
-  workflowSteps: WorkflowStepSpec[];
+  purpose: TaskPurpose;
+  roleOverrides: RoleOverrideMap;
   branch: string | null;
   baseBranch: string | null;
   parentTaskId: string;
   linkKind: TaskLinkKind;
 }
 
-function toSpec(task: Task): WorkflowStepSpec[] {
-  return task.workflow.steps.map((s) => ({
-    agent: s.agent,
-    action: s.action,
-    permission: s.permission,
-  }));
+/** Best-effort purpose a stored Task's Workflow was actually built for — used only to prefill a follow-up's purpose picker with something sensible, never to reinterpret history. */
+function inferPurpose(task: Task): TaskPurpose {
+  const actions = new Set(task.workflow.steps.map((s) => s.action));
+  if (actions.has("implement")) return "implement";
+  if (actions.has("analyze")) return "analyze";
+  return "review";
+}
+
+/** Carries the exact Agent/model each Role used in the original Task forward as this follow-up's overrides, so a follow-up never silently switches agents just because Settings' defaults changed since. */
+function overridesFromWorkflow(task: Task): RoleOverrideMap {
+  const overrides: RoleOverrideMap = {};
+  for (const step of task.workflow.steps) {
+    const role =
+      step.action === "implement"
+        ? "implementer"
+        : step.action === "analyze"
+          ? "analyzer"
+          : "reviewer";
+    if (!overrides[role]) overrides[role] = { agent: step.agent, model: step.model ?? null };
+  }
+  return overrides;
 }
 
 function formatIssues(task: Task): string {
@@ -40,18 +56,18 @@ function formatIssues(task: Task): string {
  * starting point per follow-up kind.
  */
 export function buildFollowUpPrefill(task: Task, kind: TaskLinkKind): FollowUpPrefill {
-  const specSteps = toSpec(task);
   const shared = {
     projectPath: task.projectPath,
     branch: task.branch,
     baseBranch: task.baseBranch,
     parentTaskId: task.id,
+    roleOverrides: overridesFromWorkflow(task),
   };
 
   if (kind === "fix_and_rereview") {
     return {
       ...shared,
-      title: `${task.title} — 리뷰 수정`,
+      purpose: "implement",
       instruction: [
         "[원본 작업 지시사항]",
         task.instruction,
@@ -61,33 +77,29 @@ export function buildFollowUpPrefill(task: Task, kind: TaskLinkKind): FollowUpPr
         "",
         "위 문제를 수정하고 다시 검토하라.",
       ].join("\n"),
-      workflowSteps: specSteps,
       linkKind: "fix_and_rereview",
     };
   }
 
   if (kind === "review_only") {
-    const reviewOnlySteps = specSteps.filter((s) => s.action === "review");
     return {
       ...shared,
-      title: `${task.title} — 재검토`,
+      purpose: "review",
       instruction: [
         "[원본 작업 지시사항]",
         task.instruction,
         "",
         "코드가 이미 수정되었을 수 있습니다. 현재 working tree 변경사항을 다시 검토하라.",
       ].join("\n"),
-      workflowSteps: reviewOnlySteps.length > 0 ? reviewOnlySteps : specSteps,
       linkKind: "review_only",
     };
   }
 
-  // rerun — exact same instruction/workflow, just a fresh attempt.
+  // rerun — exact same instruction/purpose, just a fresh attempt.
   return {
     ...shared,
-    title: task.title,
+    purpose: inferPurpose(task),
     instruction: task.instruction,
-    workflowSteps: specSteps,
     linkKind: "rerun",
   };
 }

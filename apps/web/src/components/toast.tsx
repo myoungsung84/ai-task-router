@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { AlertTriangle, CheckCircle2, Info, X } from "lucide-react";
 import { cn } from "@/lib/format";
 
 type ToastTone = "success" | "error" | "info";
@@ -19,12 +20,16 @@ interface ToastContextValue {
 const ToastContext = createContext<ToastContextValue | null>(null);
 
 const TONE_CLASS: Record<ToastTone, string> = {
-  success: "border-emerald-500/40 bg-emerald-950/40 text-emerald-200",
-  error: "border-red-500/40 bg-red-950/40 text-red-200",
-  info: "border-blue-500/40 bg-blue-950/40 text-blue-200",
+  success: "text-success",
+  error: "text-danger",
+  info: "text-brand",
 };
 
-const TONE_ICON: Record<ToastTone, string> = { success: "✓", error: "✕", info: "ℹ" };
+const TONE_ICON: Record<ToastTone, ReactNode> = {
+  success: <CheckCircle2 className="h-4 w-4" aria-hidden />,
+  error: <AlertTriangle className="h-4 w-4" aria-hidden />,
+  info: <Info className="h-4 w-4" aria-hidden />,
+};
 
 /**
  * Minimal global toast stack for action feedback (cancel/delete/start
@@ -54,18 +59,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             key={t.id}
             role="status"
             className={cn(
-              "pointer-events-auto flex items-start gap-2 rounded-md border px-3 py-2 text-sm shadow-lg backdrop-blur-sm",
+              "animate-fade-in-up pointer-events-auto flex items-start gap-2 rounded-lg border border-border bg-surface-raised px-4 py-3 text-sm shadow-lg",
               TONE_CLASS[t.tone],
             )}
           >
-            <span aria-hidden>{TONE_ICON[t.tone]}</span>
-            <span className="flex-1">{t.message}</span>
+            <span aria-hidden className="mt-0.5">
+              {TONE_ICON[t.tone]}
+            </span>
+            <span className="flex-1 text-fg-secondary">{t.message}</span>
             <button
               aria-label="닫기"
-              className="text-xs opacity-70 hover:opacity-100"
+              className="text-fg-faint transition-colors hover:text-fg"
               onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
             >
-              ✕
+              <X className="h-3.5 w-3.5" aria-hidden />
             </button>
           </div>
         ))}

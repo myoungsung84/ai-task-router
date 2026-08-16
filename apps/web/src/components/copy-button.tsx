@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Check, Copy, X } from "lucide-react";
 import { cn } from "@/lib/format";
 
 type CopyState = "idle" | "copied" | "failed";
@@ -50,16 +51,29 @@ export function CopyButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-1 rounded-md border border-[#232c38] px-2 py-1 text-xs transition-colors",
+        "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors duration-fast",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
         state === "copied"
-          ? "border-emerald-500/40 text-emerald-300"
+          ? "bg-success/10 text-success"
           : state === "failed"
-            ? "border-red-500/40 text-red-300"
-            : "text-[#8291a3] hover:border-[#33404f] hover:text-white",
+            ? "bg-danger/10 text-danger"
+            : "bg-fg/[0.06] text-fg-muted hover:bg-fg/[0.1] hover:text-fg",
         className,
       )}
     >
-      {state === "copied" ? "✓ 복사됨" : state === "failed" ? "✕ 복사 실패" : `⧉ ${label}`}
+      {state === "copied" ? (
+        <>
+          <Check className="h-3 w-3" aria-hidden /> 복사됨
+        </>
+      ) : state === "failed" ? (
+        <>
+          <X className="h-3 w-3" aria-hidden /> 복사 실패
+        </>
+      ) : (
+        <>
+          <Copy className="h-3 w-3" aria-hidden /> {label}
+        </>
+      )}
     </button>
   );
 }

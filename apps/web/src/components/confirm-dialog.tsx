@@ -23,16 +23,23 @@ export function ConfirmDialog({
   onCancel: () => void;
 }) {
   return (
-    <Dialog open={open} onClose={onCancel} title={title} maxWidthClassName="max-w-sm">
-      <p className="text-sm text-[#c8d1db]">{message}</p>
-      <div className="mt-5 flex justify-end gap-2">
-        <Button variant="ghost" onClick={onCancel} disabled={busy}>
-          취소
-        </Button>
-        <Button variant={danger ? "danger" : "primary"} onClick={onConfirm} disabled={busy}>
-          {busy ? "처리 중..." : confirmLabel}
-        </Button>
-      </div>
+    <Dialog
+      open={open}
+      onClose={onCancel}
+      title={title}
+      maxWidthClassName="max-w-md"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onCancel} disabled={busy}>
+            취소
+          </Button>
+          <Button variant={danger ? "danger" : "primary"} onClick={onConfirm} loading={busy}>
+            {confirmLabel}
+          </Button>
+        </div>
+      }
+    >
+      <p className="text-sm leading-relaxed text-fg-secondary">{message}</p>
     </Dialog>
   );
 }

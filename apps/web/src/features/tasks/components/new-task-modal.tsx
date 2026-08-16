@@ -7,10 +7,11 @@ import { LINK_KIND_LABEL } from "../workflow-labels";
 import type { FollowUpPrefill } from "../lib/follow-up";
 
 /**
- * Primary Task-creation path: a modal, not a separate page. Rendered once
- * (blank) by the header's "+ New Task" button — the one default entry point
- * — and, separately, by TaskDetail with a `prefill` for WARNING follow-ups
- * (a contextual action scoped to one Task, not a competing entry point).
+ * Primary task-creation path: a dialog, not a separate page. Rendered by
+ * the header's 새 작업 button — the one default entry point — by the empty
+ * dashboard's call to action, and by the task detail screen with a
+ * `prefill` for follow-ups (a contextual action scoped to one task, not a
+ * competing entry point).
  */
 export function NewTaskModal({
   open,
@@ -22,11 +23,21 @@ export function NewTaskModal({
   prefill?: FollowUpPrefill;
 }) {
   const router = useRouter();
-  const title = prefill ? `${LINK_KIND_LABEL[prefill.linkKind]} Task 생성` : "새 Task 생성";
+  const title = prefill ? LINK_KIND_LABEL[prefill.linkKind] : "새 작업";
+  const description = prefill
+    ? "이전 작업 내용을 채워 두었습니다. 시작 전에 수정할 수 있습니다."
+    : undefined;
 
   return (
-    <Dialog open={open} onClose={onClose} title={title} maxWidthClassName="max-w-3xl">
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={title}
+      description={description}
+      maxWidthClassName="max-w-2xl"
+    >
       <TaskCreateForm
+        surface="dialog"
         prefill={prefill}
         onCreated={(jobId) => {
           onClose();

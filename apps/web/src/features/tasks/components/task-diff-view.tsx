@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Card } from "@/components/card";
+import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/button";
 import { CopyButton } from "@/components/copy-button";
+import { EmptyState, LoadingState } from "@/components/states";
 import { tasksApi } from "../api/tasks-api";
 import type { TaskDiff } from "../types";
 
@@ -37,39 +38,45 @@ export function TaskDiffView({
   }, [autoFetchKey]);
 
   return (
-    <Card
-      title={
-        <div className="flex items-center justify-between gap-2">
-          <span>변경 파일 / git diff</span>
-          <div className="flex items-center gap-2">
-            <CopyButton text={diff?.diff} label="diff 복사" />
-            <Button variant="ghost" onClick={() => void load()} disabled={loading}>
-              새로고침
-            </Button>
-          </div>
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-muted">변경 파일</h3>
+        <div className="flex items-center gap-2">
+          <CopyButton text={diff?.diff} label="diff 복사" />
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<RefreshCw className="h-3.5 w-3.5" />}
+            onClick={() => void load()}
+            loading={loading}
+          >
+            새로고침
+          </Button>
         </div>
-      }
-    >
-      {error ? <p className="text-sm text-red-400">{error}</p> : null}
+      </div>
 
-      {diff && diff.changedFiles.length > 0 ? (
-        <ul className="mono mb-3 space-y-1 text-xs">
+      {error ? <p className="text-sm text-danger">{error}</p> : null}
+
+      {loading && !diff ? (
+        <LoadingState />
+      ) : diff && diff.changedFiles.length > 0 ? (
+        <ul className="mono space-y-1 text-xs">
           {diff.changedFiles.map((f) => (
-            <li key={f.path} className="text-[#c8d1db]">
-              <span className="mr-2 text-[#8291a3]">{f.status}</span>
+            <li key={f.path} className="break-all text-fg-secondary">
+              <span className="mr-2 text-fg-muted">{f.status}</span>
               {f.path}
             </li>
           ))}
         </ul>
-      ) : (
-        <p className="mb-3 text-sm text-[#8291a3]">변경된 파일이 없습니다.</p>
-      )}
+      ) : diff ? (
+        <EmptyState title="변경된 파일이 없습니다" padding="sm" />
+      ) : null}
 
       {diff?.diff ? (
-        <pre className="mono max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-black/30 p-3 text-xs text-[#c8d1db]">
+        <pre className="mono max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-surface-sunken p-4 text-xs leading-relaxed text-fg-secondary">
           {diff.diff}
         </pre>
       ) : null}
-    </Card>
+    </div>
   );
 }

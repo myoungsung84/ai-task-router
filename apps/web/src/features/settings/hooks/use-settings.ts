@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { Settings, WorkflowSpec } from "@ai-task-router/shared";
+import type { RoleSettings, Settings } from "@ai-task-router/shared";
 import { settingsApi } from "../api/settings-api";
 
 export function useSettings() {
@@ -24,11 +24,11 @@ export function useSettings() {
     void refresh();
   }, [refresh]);
 
-  const updateDefaultWorkflow = useCallback(async (workflow: WorkflowSpec) => {
-    const updated = await settingsApi.updateDefaultWorkflow(workflow);
+  const updateRoles = useCallback(async (roles: RoleSettings) => {
+    const updated = await settingsApi.updateRoles(roles);
     setSettings(updated);
     return updated;
   }, []);
 
-  return { settings, loading, error, refresh, updateDefaultWorkflow };
+  return { settings, loading, error, refresh, updateRoles };
 }
