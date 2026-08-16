@@ -72,6 +72,8 @@ export interface WorkflowStep {
   agent: AgentName;
   action: StepAction;
   permission: StepPermission;
+  /** CLI model override for this Step (e.g. "sonnet", "opus"). null/undefined = the agent CLI's own default. */
+  model?: string | null;
   status: StepStatus;
   startedAt: string | null;
   completedAt: string | null;
@@ -89,12 +91,15 @@ export interface WorkflowStepSpec {
   agent: AgentName;
   action: StepAction;
   permission: StepPermission;
+  /** CLI model override for this Step. Omit/null = the agent CLI's own default. */
+  model?: string | null;
 }
 
 export interface WorkflowSpec {
   steps: WorkflowStepSpec[];
 }
 
+/** @deprecated presets belong to the removed Custom Workflow editor; new code drives Workflow construction from `TaskPurpose` + role Settings (see `resolveWorkflowSpecForPurpose` in `workflow-purpose.ts`). Kept only so a `Task.workflow` persisted by an old build, or a `workflow` still passed explicitly by an un-updated MCP caller, keeps typechecking. */
 export type WorkflowPresetId = "default_dev" | "analyze_only" | "no_review" | "custom";
 
 export interface WorkflowPreset {
@@ -140,6 +145,39 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
 export function findWorkflowPreset(id: WorkflowPresetId): WorkflowPreset | undefined {
   return WORKFLOW_PRESETS.find((p) => p.id === id);
 }
+
+// ---------------------------------------------------------------------------
+// Task purpose & roles — replaces hand-assembled Workflow Steps as the thing
+// a Task creator (web UI or MCP caller) actually declares. `TaskPurpose` is
+// the same three values as `StepAction` (kept as a distinct name because it
+// describes the *whole Task's* intent, not one Step), and the server turns
+// it into a full Workflow via `resolveWorkflowSpecForPurpose` (workflow-purpose.ts),
+// using each Role's Agent/model from Settings unless a per-Task override is
+// given. Permission is never client-controlled — the server derives it from
+// purpose/role every time (implement's own Step is "write", everything else
+// "read-only").
+// ---------------------------------------------------------------------------
+
+export type TaskPurpose = StepAction;
+
+/** The three jobs a Task's Workflow can be made of. Each maps to exactly one Settings-configurable Agent+model. */
+export type TaskRole = "implementer" | "analyzer" | "reviewer";
+
+export const TASK_ROLES: TaskRole[] = ["implementer", "analyzer", "reviewer"];
+
+export interface RoleConfig {
+  agent: AgentName;
+  /** CLI model override for this role's Steps. null/undefined = the agent CLI's own default. */
+  model?: string | null;
+}
+
+/** Per-Task, per-Role override — set only for the Role(s) actually used by that Task's purpose. Never changes `permission`. */
+export interface RoleOverride {
+  agent?: AgentName;
+  model?: string | null;
+}
+
+export type RoleSettings = Record<TaskRole, RoleConfig>;
 
 // ---------------------------------------------------------------------------
 // Legacy (pre-workflow) result shapes. No longer written by new Tasks, but
@@ -230,7 +268,18 @@ export interface CreateTaskInput {
   instruction: string;
   baseBranch?: string | null;
   branch?: string | null;
-  /** Omit to fall back to this project's last-remembered Workflow, then Settings' default. */
+  /**
+   * What this Task is for — determines its Workflow: `implement` runs the
+   * implementer Role (write) then the reviewer Role (read-only);
+   * `analyze`/`review` run only the analyzer/reviewer Role, read-only.
+   * Required for new callers (web UI always sends it). Omitted only by
+   * not-yet-updated MCP callers — the server falls back to `implement` in
+   * that case (see taskService.createTask) rather than rejecting the call.
+   */
+  purpose?: TaskPurpose;
+  /** Per-Task Agent/model override for one or more Roles used by `purpose`. Omit to use Settings' Role defaults. */
+  roleOverrides?: Partial<Record<TaskRole, RoleOverride>> | null;
+  /** @deprecated Legacy escape hatch: an explicit Workflow bypasses `purpose`/`roleOverrides` entirely and runs exactly these Steps. Still fully supported (old stored Tasks and not-yet-updated external callers keep working), but the web UI no longer sends this — prefer `purpose`. */
   workflow?: WorkflowSpec | null;
   /** Set when this Task is a WARNING follow-up created from another Task. */
   parentTaskId?: string | null;
@@ -278,9 +327,24 @@ export function statusGroupOf(status: TaskStatus): StatusGroup {
 // ---------------------------------------------------------------------------
 
 export interface Settings {
-  defaultWorkflow: WorkflowSpec;
+  /** Agent + model for each of the three Roles — what `resolveWorkflowSpecForPurpose` builds a Task's Workflow from when the Task itself doesn't override a Role. */
+  roles: RoleSettings;
+  /** @deprecated pre-Role Settings shape (a single hand-built default Workflow). Kept only so an already-stored settings.json keeps typechecking; `settings-store.ts` migrates it into `roles` on load and never writes it again. */
+  defaultWorkflow?: WorkflowSpec;
 }
 
+/** `Claude 구현 → Codex 리뷰` — the recommended starting point, not a fixed pairing; every Role is independently editable in Settings. */
+export const DEFAULT_ROLE_SETTINGS: RoleSettings = {
+  // "sonnet"/"opus"/"haiku" are the Claude CLI's own stable tier aliases
+  // (see apps/web's model catalog) — used here (not a dated snapshot id) so
+  // the recommended default never goes stale. Codex has no equivalent
+  // stable alias, so its default is `null` ("let the CLI pick"), matching
+  // its own catalog's recommended card.
+  implementer: { agent: "claude", model: "sonnet" },
+  analyzer: { agent: "claude", model: "sonnet" },
+  reviewer: { agent: "codex", model: null },
+};
+
 export const DEFAULT_SETTINGS: Settings = {
-  defaultWorkflow: findWorkflowPreset("default_dev")!.workflow!,
+  roles: DEFAULT_ROLE_SETTINGS,
 };
