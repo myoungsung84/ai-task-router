@@ -1,5 +1,11 @@
 # Task Lifecycle
 
+> How a Task's `workflow.steps[]` gets decided in the first place —
+> `TaskPurpose` + Settings' Role config, not something assembled by hand — is
+> covered in [architecture.md](./architecture.md#task-purpose--roles-replaces-hand-built-workflow-steps).
+> Everything below is what happens once that Workflow exists, which hasn't
+> changed.
+
 ## Status values
 
 | status      | meaning                                                                  |

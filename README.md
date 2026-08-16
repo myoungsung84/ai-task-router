@@ -1,9 +1,13 @@
 # ai-task-router
 
 로컬 개발용 AI 작업 관제 도구. 여러 로컬 프로젝트에 대해 Claude/Codex CLI
-작업을 병렬 실행하고, 진행 상황을 웹 대시보드에서 실시간으로 확인합니다.
-Task는 사람이 구성 가능한 **Workflow**(Agent × Action × Permission Step의
-순서열)로 실행되며, 리뷰 Step은 실제 git diff가 있을 때만 수행됩니다.
+작업을 병렬 실행하고, Claude와 Codex를 AI 팀 구성원으로 삼아 진행 상황을 웹
+대시보드에서 실시간으로 확인합니다. Task를 만들 때는 **목적**(`implement`
+구현 / `analyze` 분석 / `review` 리뷰)만 정하면 되고, 실제로 어떤 Agent·모델이
+그 목적을 수행할지는 Settings의 **역할**(구현 담당/분석 담당/리뷰 담당) 설정을
+따릅니다 — Custom Workflow를 직접 조립하는 화면은 없습니다. 내부적으로는
+여전히 Agent × Action × Permission Step의 순서열(**Workflow**)로 실행되며,
+리뷰 Step은 실제 git diff가 있을 때만 수행됩니다.
 
 자세한 구조는 [docs/architecture.md](docs/architecture.md), 상태 전이는
 [docs/task-lifecycle.md](docs/task-lifecycle.md)를 참고하세요.
@@ -70,44 +74,65 @@ pnpm dev:web
 
 ## 기본 Task 실행 흐름
 
-1. 메인 대시보드의 **+ New Task** 버튼 → 모달에서 생성(별도 페이지 이동 없음;
-   `/tasks/new`는 fallback 경로로 남아 있습니다)
-2. `title`, `projectPath`(로컬 Git 저장소 경로), `instruction`, 필요 시
-   `baseBranch`/`branch`, 그리고 **Workflow**(preset 또는 Custom Step 구성)를
-   입력 — Workflow를 지정하지 않으면 Settings의 기본 Workflow가 사용됩니다.
-3. 서버가 Workflow의 Step을 순서대로 실행합니다.
+1. 헤더의 **새 작업** 버튼 → 다이얼로그에서 생성합니다(작업 생성 전용
+   페이지는 없습니다). 제목 입력란은 없습니다 — 서버가 `instruction`으로부터
+   자동 생성합니다.
+2. **프로젝트**를 고릅니다 — 최근 사용한 프로젝트가 기본 선택되며, 직접
+   드롭다운에서 고르거나 다른 경로를 입력할 수 있습니다. 존재하고 Git
+   저장소인 경로만 실행 가능합니다.
+3. `implement`(구현) 목적일 때만 **브랜치** 컨트롤이 프로젝트 옆에 나타나
+   "현재 브랜치" 또는 "새 브랜치"를 고를 수 있습니다. `analyze`/`review`는
+   읽기 전용이라 브랜치 생성 옵션이 아예 보이지 않습니다.
+4. **작업 지시**를 적고 **작업 유형**(구현/분석/리뷰)을 고릅니다. 각 선택지는
+   실제로 어떤 AI가 그 역할을 맡는지(설정의 역할별 기본값)를 바로 보여주며,
+   그 아래 **담당 AI 변경**을 펼치면 이 작업에서만 담당 AI/모델을 바꿀 수
+   있습니다.
+5. 서버가 목적 + 역할 설정으로부터 실제 Workflow(Agent × Action ×
+   Permission Step의 순서열)를 만들어 순서대로 실행합니다.
    - 프로젝트 경로/Git 저장소 여부 확인, branch 확인/생성
-   - 각 Step: 지정된 Agent(`claude`/`codex`)를 지정된 Action(`implement` 구현 /
-     `analyze` 분석 / `review` 리뷰)과 Permission(`write`/`read-only`)으로 실행,
-     stdout/stderr를 SSE로 실시간 표시
+   - 각 Step의 stdout/stderr를 SSE로 실시간 표시
    - `review` Step은 실행 직전 git diff를 확인해, 변경사항이 없으면
      **SKIPPED(NO_CHANGES)** 처리하고 CLI를 아예 실행하지 않습니다
    - 모든 Step 완료 후 어떤 리뷰든 WARNING을 반환했다면 `WARNING`, 아니면
      `READY`; `implement`/`analyze` Step이 실패하면 즉시 `FAILED`
-4. Task 상세 화면에서 Workflow 진행 상황, 로그, 변경 파일, diff, 리뷰 결과를
-   탭으로 확인
-5. 실행 중인 Task는 **작업 중단** 버튼(확인 다이얼로그 포함)으로 취소 가능
+6. Task 상세 화면은 상단에 상태·제목·실행 액션을 두고, 그 아래를 두 열로
+   나눠 왼쪽에 검토 결과/실패 배너와 단계별 결과·작업 지시·변경 파일·
+   리뷰/변경 내용/실행 로그 탭을, 오른쪽에 진행 단계와 프로젝트·브랜치·담당
+   AI·시간을 보여줍니다. 핵심 결과가 항상 로그와 기술 정보보다 먼저 보입니다.
+7. 실행 중인 Task는 **작업 중단** 버튼(확인 다이얼로그 포함)으로 취소 가능
    (해당 Task의 프로세스만 종료)
 
 리뷰가 WARNING을 반환해도 다른 Agent가 자동으로 재작업하지 않습니다 — 최종
 수정 여부는 사용자가 직접 판단합니다.
 
-## Workflow
+## Task 목적과 역할(Role)
 
-Task는 `Agent(claude|codex) × Action(implement|analyze|review) ×
-Permission(write|read-only)`로 이루어진 Step의 순서열로 실행됩니다. Claude가
-항상 구현을, Codex가 항상 리뷰를 맡는 구조가 아닙니다 — 아래처럼 자유롭게
-구성할 수 있습니다.
+Task를 만들 때 사람이 직접 정하는 것은 **목적**(`TaskPurpose`) 하나뿐입니다.
 
-- 기본 개발: `claude/implement/write` → `codex/review/read-only`
-- 분석만: `claude/analyze/read-only`
-- 리뷰 없음: `claude/implement/write`
-- Codex가 구현하고 Claude가 리뷰, Codex가 구현하고 Codex가 리뷰 등도 동일한
-  구조로 표현됩니다.
+- `implement`: 파일을 실제로 변경. **구현 담당** Role이 write 권한으로
+  작업하고, 이어서 **리뷰 담당** Role이 read-only로 결과를 검토합니다.
+- `analyze`: 파일을 수정하지 않는 조사/설명. **분석 담당** Role만 read-only로
+  실행됩니다.
+- `review`: 현재 변경사항을 읽기 전용으로 검토만. **리뷰 담당** Role만
+  read-only로 실행됩니다.
 
-Settings(`/settings`)에서 기본 Workflow를 구성할 수 있고, Task 생성 시
-Task별로 override할 수 있습니다(우선순위: Task 개별 Workflow > Settings 기본
-Workflow).
+각 Role(`implementer`/`analyzer`/`reviewer`)에 어떤 Agent(`claude`/`codex`)와
+모델을 쓸지는 Settings(`/settings`)에서 설정합니다. `Claude 구현 → Codex
+리뷰`는 추천 기본값일 뿐 고정된 조합이 아닙니다 — 세 Role 모두 독립적으로
+Claude/Codex 중 아무거나 지정할 수 있습니다. Task 생성 시 `roleOverrides`로
+그 Task에서만 특정 Role의 Agent/모델을 바꿀 수 있고, 생략하면 Settings 값을
+그대로 씁니다. `permission`(write/read-only)은 항상 서버가 목적과 Role로부터
+결정하며 클라이언트가 지정할 수 없습니다.
+
+서버 내부에서는 여전히 `Agent(claude|codex) × Action(implement|analyze|review)
+× Permission(write|read-only) × model` Step의 순서열(**Workflow**)로
+실행됩니다 — `resolveWorkflowSpecForPurpose`(`packages/shared`)가 목적 + Role
+설정 + override를 이 Workflow로 변환하는 유일한 지점입니다. 이전 버전에 있던
+"프로젝트별 마지막 Workflow를 다음 Task에 암묵적으로 이어받는" 동작은
+제거됐습니다 — Workflow는 항상 목적 + 그 시점의 Settings/override로부터 새로
+계산됩니다. `workflow`를 직접 지정하는 것은 여전히 가능하지만(레거시/고급
+경로, 기존 저장 Task 및 옛 MCP 호출과의 호환을 위해 유지) 지정하면
+purpose/roleOverrides를 완전히 무시합니다.
 
 ## Job ID
 
@@ -144,18 +169,26 @@ REST API(`/api/tasks/*`)와 동일한 `TaskService`/Task Store를 공유하므�
 
 사용 가능한 Tools:
 
-- `run_task` — Task 하나를 생성하고 즉시 실행. `workflow`를 생략하면 Settings의
-  기본 Workflow를 사용합니다. 완료를 기다리지 않고
-  `{ taskId, jobId, status, dashboardUrl }`을 바로 반환합니다.
+- `run_task` — Task 하나를 생성하고 즉시 실행. `title`을 생략하면
+  `instruction`으로부터 자동 생성됩니다. **`purpose`(`implement` /
+  `analyze` / `review`)로 이 Task의 목적을 명시하세요** — 생략하면
+  `implement`로 처리됩니다(호환용 기본값이며, 새 호출은 항상 명시하는 것을
+  권장합니다). 실제 Agent/모델은 Settings의 역할별(구현/분석/리뷰) 기본값을
+  따르며, `roleOverrides`로 이 Task에서만 override할 수 있습니다 (예:
+  `{ "implementer": { "agent": "codex" } }`). `workflow`는 Step을 직접
+  지정하는 고급/레거시 경로로, 지정하면 `purpose`/`roleOverrides`를 완전히
+  무시합니다. 완료를 기다리지 않고 `{ taskId, jobId, status, dashboardUrl }`을
+  바로 반환합니다.
 - `run_tasks` — 여러 Task를 한 번에 생성/실행 (서로 다른 프로젝트는 병렬 진행,
-  Task별로 다른 `workflow` 지정 가능).
+  Task별로 다른 `purpose`/`roleOverrides`/`workflow` 지정 가능).
 - `list_tasks` — Task 목록 조회 (`status`로 선택적 필터링).
 - `get_task` — 특정 Task의 상태/Workflow Step별 결과/변경 파일 조회 (전체
   로그는 제외해 응답 크기를 작게 유지).
 - `get_task_result` — 완료된 Task의 최종 검토용 정보(원 지시사항, 최종 상태,
   Workflow Step별 결과, git status, 변경 파일, git diff). diff가 크면 잘라서
   반환하고 `diffTruncated`로 표시합니다.
-- `cancel_task` — 실행 중인 Task 중단 (해당 Task의 프로세스만 종료).
+- `cancel_task` — 대기 중이거나 실행 중인 Task 중단 (해당 Task의 프로세스만
+  종료; 대기 중이면 즉시 취소 처리).
 
 `taskId` 파라미터는 UUID와 Job ID(`T-1042`) 모두 받습니다. 모든 응답에는
 가능한 경우 `taskId`(UUID)와 `jobId`가 함께 포함됩니다.
@@ -164,6 +197,12 @@ REST API(`/api/tasks/*`)와 동일한 `TaskService`/Task Store를 공유하므�
 생성하고 실행을 시작시킨 뒤 곧바로 응답하며, 실제 작업은 서버에서 백그라운드로
 계속 진행됩니다. 진행 상황은 대시보드(SSE)나 `get_task` 폴링, 완료 후
 `get_task_result`로 확인하세요.
+
+> 이 저장소 밖의 MCP 클라이언트(예: ChatGPT의 커스텀 스킬)가 `purpose`와
+> `roleOverrides`를 전달하도록 업데이트하려면, 위 `run_task` 설명과 아래
+> "역할(Role)" 절이 필요한 인터페이스 전부입니다 — 서버 쪽 스키마는
+> `apps/server/src/tasks/task-input.ts`(`taskSpecShape`)에 정의돼 있고, MCP
+> `run_task`/`run_tasks` 도구 설명에도 동일한 내용이 그대로 노출됩니다.
 
 ### ChatGPT Desktop에 연결하기
 
