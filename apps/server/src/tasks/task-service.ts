@@ -7,12 +7,15 @@ import type {
   TaskListItem,
   WorkflowSpec,
 } from "@ai-task-router/shared";
-import { generateTitleFromInstruction } from "@ai-task-router/shared";
+import {
+  generateTitleFromInstruction,
+  resolveWorkflowSpecForPurpose,
+} from "@ai-task-router/shared";
 import { taskStore } from "./task-store";
 import { activeRuns, cancelActiveRun, executeTask, isProjectPathBusy } from "./task-executor";
 import { validateProjectPath, normalizeForCompare } from "../projects/project-validator";
 import { getChangedFiles, getDiff, isGitRepository } from "../git/git-manager";
-import { getLastWorkflowForProject, recordProjectUsage } from "../projects/project-memory-store";
+import { recordProjectUsage } from "../projects/project-memory-store";
 import { allocateJobId } from "./job-id";
 import { buildWorkflowFromSpec } from "./workflow-builder";
 import { settingsService } from "../settings/settings-service";
@@ -73,13 +76,25 @@ export const taskService = {
       throw new TaskServiceError(validation.error ?? "projectPath가 올바르지 않습니다.");
     }
 
-    // Workflow precedence: explicit input (includes a WARNING follow-up
-    // passing its parent's Workflow along) > this project's last-remembered
-    // Workflow > Settings' default.
+    // Workflow source, in priority order:
+    //   1. an explicit `workflow` — the legacy/advanced escape hatch (a
+    //      WARNING follow-up re-running its parent's exact Steps also goes
+    //      through here). Bypasses purpose/roleOverrides entirely.
+    //   2. `purpose` + `roleOverrides`, resolved against Settings' Role
+    //      config — the normal path for both the web UI and any MCP caller
+    //      that specifies purpose.
+    //   3. `purpose` defaulted to "implement" — only reached by an
+    //      old/not-yet-updated MCP caller that sends neither `workflow` nor
+    //      `purpose`; keeps such a caller working rather than rejecting it.
+    // Deliberately NOT included: any per-project "last Workflow used" memory
+    // — Workflow is always derived fresh from purpose + Settings/overrides.
     const spec: WorkflowSpec =
       input.workflow ??
-      getLastWorkflowForProject(validation.normalizedPath) ??
-      settingsService.get().defaultWorkflow;
+      resolveWorkflowSpecForPurpose(
+        input.purpose ?? "implement",
+        settingsService.get().roles,
+        input.roleOverrides,
+      );
     if (!spec.steps || spec.steps.length === 0) {
       throw new TaskServiceError("workflow.steps는 최소 1개 이상이어야 합니다.");
     }
@@ -106,7 +121,7 @@ export const taskService = {
     };
 
     taskStore.create(task);
-    recordProjectUsage(validation.normalizedPath, spec);
+    recordProjectUsage(validation.normalizedPath);
     return task;
   },
 

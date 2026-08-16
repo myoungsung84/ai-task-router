@@ -23,6 +23,7 @@ import type { AgentRunHandle, AgentRunOutcome, RunnerLogLine } from "../agent-ty
 export function runCodexStep(
   action: StepAction,
   permission: StepPermission,
+  model: string | null,
   instruction: string,
   taskTitle: string,
   cwd: string,
@@ -48,7 +49,10 @@ export function runCodexStep(
   }
 
   args.push("--sandbox", sandbox);
-  if (config.codexModel) args.push("-m", config.codexModel);
+  // Step-level model (Settings' role config or a per-Task override) wins;
+  // CODEX_MODEL is only the fallback for when neither specifies one.
+  const effectiveModel = model || config.codexModel;
+  if (effectiveModel) args.push("-m", effectiveModel);
 
   const prompt = action === "review" ? buildReviewPrompt(taskTitle, instruction) : instruction;
   args.push(prompt);

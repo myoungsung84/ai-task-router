@@ -10,7 +10,7 @@ import type { AgentRunHandle, AgentRunOutcome, RunnerLogLine } from "./agent-typ
  * is the only place that does.
  */
 export function runWorkflowStep(
-  step: Pick<WorkflowStep, "agent" | "action" | "permission">,
+  step: Pick<WorkflowStep, "agent" | "action" | "permission" | "model">,
   instruction: string,
   taskTitle: string,
   cwd: string,
@@ -18,7 +18,24 @@ export function runWorkflowStep(
   onLog: (line: RunnerLogLine) => void,
 ): { handle: AgentRunHandle; result: Promise<AgentRunOutcome> } {
   if (step.agent === "claude") {
-    return runClaudeStep(step.action, step.permission, instruction, taskTitle, cwd, onLog);
+    return runClaudeStep(
+      step.action,
+      step.permission,
+      step.model ?? null,
+      instruction,
+      taskTitle,
+      cwd,
+      onLog,
+    );
   }
-  return runCodexStep(step.action, step.permission, instruction, taskTitle, cwd, taskDir, onLog);
+  return runCodexStep(
+    step.action,
+    step.permission,
+    step.model ?? null,
+    instruction,
+    taskTitle,
+    cwd,
+    taskDir,
+    onLog,
+  );
 }

@@ -9,6 +9,7 @@ export function buildWorkflowFromSpec(spec: WorkflowSpec): Workflow {
     agent: s.agent,
     action: s.action,
     permission: s.permission,
+    model: s.model ?? null,
     status: "PENDING",
     startedAt: null,
     completedAt: null,

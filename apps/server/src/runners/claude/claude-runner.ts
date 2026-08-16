@@ -24,6 +24,7 @@ function splitLines(buffer: { partial: string }, chunk: string): string[] {
 export function runClaudeStep(
   action: StepAction,
   permission: StepPermission,
+  model: string | null,
   instruction: string,
   taskTitle: string,
   cwd: string,
@@ -33,6 +34,7 @@ export function runClaudeStep(
   const permissionMode = permission === "write" ? config.claudePermissionMode : "plan";
 
   const args = ["-p", prompt, "--permission-mode", permissionMode];
+  if (model) args.push("--model", model);
   const child = safeSpawn(config.claudeBin, args, { cwd });
 
   let cancelled = false;

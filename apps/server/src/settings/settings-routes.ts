@@ -7,13 +7,11 @@ settingsRouter.get("/", (_req, res) => {
   res.json(settingsService.get());
 });
 
-settingsRouter.put(
-  "/default-workflow",
-  (req: Request<unknown, unknown, { defaultWorkflow?: unknown }>, res) => {
-    const updated = settingsService.updateDefaultWorkflow(req.body?.defaultWorkflow);
-    res.json(updated);
-  },
-);
+/** Saves the 구현/분석/리뷰 Role cards from the Settings screen — see settingsService.updateRoles. */
+settingsRouter.put("/roles", (req: Request<unknown, unknown, { roles?: unknown }>, res) => {
+  const updated = settingsService.updateRoles(req.body?.roles);
+  res.json(updated);
+});
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 settingsRouter.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

@@ -46,6 +46,8 @@ async function createAndStartTask(spec: TaskSpec) {
     instruction: spec.instruction,
     baseBranch: spec.baseBranch ?? null,
     branch: spec.branch ?? null,
+    purpose: spec.purpose,
+    roleOverrides: spec.roleOverrides ?? null,
     workflow: spec.workflow ?? null,
   });
 
@@ -79,7 +81,11 @@ export function registerTaskTools(server: McpServer): void {
     {
       title: "Run Task",
       description:
-        "새 Task를 생성하고 즉시 실행한다. Claude/Codex 작업 완료를 기다리지 않고 taskId/jobId를 바로 반환한다. title을 생략하면 instruction으로부터 자동 생성된다. workflow를 생략하면 이 프로젝트의 마지막 Workflow, 그마저 없으면 Settings의 기본 Workflow를 사용한다.",
+        "새 Task를 생성하고 즉시 실행한다. Claude/Codex 작업 완료를 기다리지 않고 taskId/jobId를 바로 " +
+        "반환한다. title을 생략하면 instruction으로부터 자동 생성된다. purpose(implement/analyze/review)로 " +
+        "이 Task의 목적을 명시하라 — 생략하면 implement로 처리된다. 실제 Agent/모델은 Settings의 " +
+        "역할별(구현/분석/리뷰) 기본값을 따르며, roleOverrides로 이 Task에서만 override할 수 있다. " +
+        "workflow는 Step을 직접 지정하는 고급/레거시 경로로, 지정하면 purpose/roleOverrides를 무시한다.",
       inputSchema: taskSpecShape,
     },
     async (args) => {
