@@ -17,6 +17,7 @@ import {
 } from "../workflow-labels";
 import { useTask } from "../hooks/use-task";
 import { useNowTick } from "../hooks/use-now-tick";
+import { compareReviewIssueSeverity } from "../types";
 import type { TaskListItem } from "../types";
 
 const RESULT_TEXT_LIMIT = 120;
@@ -45,9 +46,11 @@ const COL = {
 const ROW_BASE =
   "group relative flex cursor-pointer items-center gap-4 px-4 transition-colors duration-fast hover:bg-fg/[0.03]";
 
-/** Reason chip tone — REVIEW_NEEDS_FIX reads softer (지적 사항, still fixable from the review itself) than the two "이 결과를 신뢰할 수 없다" cases. */
+/** Reason chip tone — REVIEW_NEEDS_FIX reads softer (지적 사항, still fixable from the review itself) than the other, more urgent cases. */
 const ATTENTION_REASON_TONE: Record<AttentionReason, Tone> = {
   EXECUTION_FAILED: "danger",
+  SECURITY_CRITICAL: "danger",
+  SECURITY_HIGH: "danger",
   REVIEW_FAILED: "danger",
   REVIEW_NEEDS_FIX: "warning",
 };
@@ -66,14 +69,23 @@ function truncateResult(text: string): string {
  */
 function resultLine(task: TaskListItem): { text: string; tone: "warning" | "muted" } {
   if (task.status === "WARNING") {
-    for (const step of task.workflow.steps) {
-      const issue = step.result?.review?.issues[0];
-      if (issue) {
-        return {
-          text: truncateResult(`${AGENT_LABEL[step.agent]}: ${issue.message}`),
-          tone: "warning",
-        };
-      }
+    // Same priority as the reason chip next to this text: a Security issue
+    // (then highest severity) is the most useful single line to show, not
+    // just whichever issue the reviewing agent happened to list first.
+    const ranked = task.workflow.steps
+      .flatMap((step) => (step.result?.review?.issues ?? []).map((issue) => ({ step, issue })))
+      .sort((a, b) => {
+        const aSecurity = a.issue.category === "SECURITY" ? 1 : 0;
+        const bSecurity = b.issue.category === "SECURITY" ? 1 : 0;
+        if (aSecurity !== bSecurity) return bSecurity - aSecurity;
+        return compareReviewIssueSeverity(b.issue.severity, a.issue.severity);
+      });
+    const top = ranked[0];
+    if (top) {
+      return {
+        text: truncateResult(`${AGENT_LABEL[top.step.agent]}: ${top.issue.message}`),
+        tone: "warning",
+      };
     }
   }
   if (task.status === "FAILED") {

@@ -37,7 +37,27 @@ export type StepStatus = "PENDING" | "RUNNING" | "SUCCESS" | "SKIPPED" | "FAILED
 /** Why a step was skipped. NO_CHANGES = review step skipped, no diff to review. LEGACY = backfilled from a pre-workflow stored task, real reason unknown. */
 export type SkipReason = "NO_CHANGES" | "LEGACY";
 
-export type ReviewIssueSeverity = "low" | "medium" | "high";
+export type ReviewIssueSeverity = "low" | "medium" | "high" | "critical";
+
+/**
+ * What kind of concern an Issue is about — additive alongside `severity`
+ * (how bad) so a Security problem can be told apart from ordinary review
+ * feedback. Kept deliberately small (not one category per review-prompt
+ * bullet point): `SECURITY` is the one category anything downstream (Needs
+ * Attention, the AI handoff copy, a future Auto Fix Loop gate) actually
+ * treats differently today, `REQUIREMENT` covers "지시사항 대비 누락",
+ * `CODE_QUALITY` is everything else the review prompt's normal checklist
+ * catches (버그/타입/null 처리/회귀 등), and `OTHER` is the deliberate
+ * catch-all — most importantly for the parse-failure synthetic Issue (see
+ * claude-runner.ts/codex-runner.ts), which must never be mistaken for a real
+ * Security finding.
+ *
+ * Optional on `ReviewIssue` and additive-only: a stored Issue from before
+ * this field existed simply has `category: undefined`, which every reader
+ * here (securityIssuesOf, ReviewPanel, attentionReasonOf) already treats as
+ * "not Security" — no migration needed for old task.json data.
+ */
+export type ReviewIssueCategory = "SECURITY" | "CODE_QUALITY" | "REQUIREMENT" | "OTHER";
 
 export interface ReviewIssue {
   severity: ReviewIssueSeverity;
@@ -47,6 +67,8 @@ export interface ReviewIssue {
   message: string;
   /** Best-effort concrete fix suggestion from the reviewing agent. Omitted when none was given. */
   suggestion?: string | null;
+  /** What this Issue is about (see `ReviewIssueCategory`). Optional/additive — absent on Issues stored before this field existed, or when the agent's own answer didn't parse to a known category. */
+  category?: ReviewIssueCategory | null;
 }
 
 /** Structured outcome of a `review`-action step. */
@@ -55,6 +77,61 @@ export interface ReviewOutcome {
   issues: ReviewIssue[];
   /** Raw text the agent produced, kept for debugging when structured parsing fails partially. */
   raw?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Review severity/category helpers — the one place severity is ranked and
+// Security issues are picked out, so no caller (web UI today; a future Auto
+// Fix Loop gate later) re-implements "LOW < MEDIUM < HIGH < CRITICAL" or
+// "what counts as Security" on its own. All take a plain `ReviewIssue[]` —
+// callers flatten across `workflow.steps[].result.review.issues` themselves,
+// since a Task can have more than one review Step.
+// ---------------------------------------------------------------------------
+
+const REVIEW_SEVERITY_RANK: Record<ReviewIssueSeverity, number> = {
+  low: 0,
+  medium: 1,
+  high: 2,
+  critical: 3,
+};
+
+/** Never compare `ReviewIssueSeverity` values by string/alphabetical order — this is the one place the LOW < MEDIUM < HIGH < CRITICAL ranking lives. */
+export function compareReviewIssueSeverity(
+  a: ReviewIssueSeverity,
+  b: ReviewIssueSeverity,
+): number {
+  return REVIEW_SEVERITY_RANK[a] - REVIEW_SEVERITY_RANK[b];
+}
+
+/** Highest severity present in `issues`, or `null` for an empty list. */
+export function maxReviewIssueSeverity(issues: ReviewIssue[]): ReviewIssueSeverity | null {
+  let max: ReviewIssueSeverity | null = null;
+  for (const issue of issues) {
+    if (max === null || compareReviewIssueSeverity(issue.severity, max) > 0) max = issue.severity;
+  }
+  return max;
+}
+
+/** Just the Security-category Issues out of a set — `category` is optional, so an Issue stored before this field existed (or a parse-failure fallback Issue, always `OTHER`) is never included here. */
+export function securityIssuesOf(issues: ReviewIssue[]): ReviewIssue[] {
+  return issues.filter((i) => i.category === "SECURITY");
+}
+
+/** Highest severity among `issues`' Security-category Issues, or `null` when there are none — the single place "이 Task의 Security 심각도" is computed. */
+export function securityReviewLevelOf(issues: ReviewIssue[]): ReviewIssueSeverity | null {
+  return maxReviewIssueSeverity(securityIssuesOf(issues));
+}
+
+/**
+ * HIGH/CRITICAL Security issues are the ones meant to require a person's
+ * attention rather than being auto-resolvable — not enforced as a gate
+ * anywhere yet (`task-service.ts`'s `resolveWarning` deliberately still lets
+ * the user complete over any severity, see its own comment), but centralized
+ * here for a future Auto Review/Fix Loop to check.
+ */
+export function hasBlockingSecurityIssue(issues: ReviewIssue[]): boolean {
+  const level = securityReviewLevelOf(issues);
+  return level === "high" || level === "critical";
 }
 
 export interface WorkflowStepResult {

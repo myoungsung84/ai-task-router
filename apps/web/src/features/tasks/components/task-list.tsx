@@ -27,9 +27,11 @@ const SECTION_LABEL: Record<"active" | "attention" | "done", string> = {
   done: "완료",
 };
 
-// Display order for the "확인 필요" section's reason breakdown — most
-// actionable-by-the-user-right-now first.
+// Display order for the "확인 필요" section's reason breakdown — Security
+// findings first (they're the most urgent), then the same order as before.
 const ATTENTION_REASON_ORDER: AttentionReason[] = [
+  "SECURITY_CRITICAL",
+  "SECURITY_HIGH",
   "REVIEW_NEEDS_FIX",
   "REVIEW_FAILED",
   "EXECUTION_FAILED",

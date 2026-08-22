@@ -41,12 +41,13 @@ import {
   ATTENTION_REASON_LABEL,
   LINK_KIND_LABEL,
   SEVERITY_LABEL,
+  SEVERITY_TONE,
   attentionReasonOf,
   taskActivityPhrase,
 } from "../workflow-labels";
 import { taskToCopyText, taskToAiHandoffText } from "../lib/task-copy-text";
 import { buildFollowUpPrefill } from "../lib/follow-up";
-import { isTerminalStatus } from "../types";
+import { compareReviewIssueSeverity, isTerminalStatus, securityReviewLevelOf } from "../types";
 import type { TaskDiff, TaskLinkKind } from "../types";
 
 const CANCELLABLE = new Set(["QUEUED", "RUNNING", "REVIEWING"]);
@@ -139,16 +140,39 @@ export function TaskDetail({ id }: { id: string }) {
   // decide whether "검토 후 완료 처리" makes sense and to spell out exactly
   // what's being signed off on in the confirm dialog.
   const reviewIssueSummary = useMemo(() => {
-    if (!task) return { total: 0, high: 0, medium: 0, low: 0 };
+    if (!task) return { total: 0, critical: 0, high: 0, medium: 0, low: 0 };
     const issues = task.workflow.steps.flatMap((s) => s.result?.review?.issues ?? []);
-    const counts = { high: 0, medium: 0, low: 0 };
+    const counts = { critical: 0, high: 0, medium: 0, low: 0 };
     for (const i of issues) counts[i.severity] += 1;
     return { total: issues.length, ...counts };
   }, [task]);
 
+  // This Task's Security standing — `null` when no review Issue is
+  // category "SECURITY" (the common case), so every place below that reads
+  // this only has to check for `null` rather than re-filtering issues[]
+  // itself.
+  const securityIssueSummary = useMemo(() => {
+    if (!task) return { level: null as ReturnType<typeof securityReviewLevelOf>, count: 0 };
+    const issues = task.workflow.steps.flatMap((s) => s.result?.review?.issues ?? []);
+    const securityCount = issues.filter((i) => i.category === "SECURITY").length;
+    return { level: securityReviewLevelOf(issues), count: securityCount };
+  }, [task]);
+
+  // Same issues as reviewIssueSummary, ordered Security-first (then by
+  // severity) rather than however the reviewing agent happened to list
+  // them — the Alert box only ever shows the first few, and for a Task
+  // flagged for Security those are exactly the ones that belong up top.
   const topIssues = useMemo(() => {
     if (!task) return [];
-    return task.workflow.steps.flatMap((s) => s.result?.review?.issues ?? []).slice(0, 3);
+    const issues = task.workflow.steps.flatMap((s) => s.result?.review?.issues ?? []);
+    return [...issues]
+      .sort((a, b) => {
+        const aSecurity = a.category === "SECURITY" ? 1 : 0;
+        const bSecurity = b.category === "SECURITY" ? 1 : 0;
+        if (aSecurity !== bSecurity) return bSecurity - aSecurity;
+        return compareReviewIssueSeverity(b.severity, a.severity);
+      })
+      .slice(0, 3);
   }, [task]);
 
   // "검토 후 완료 처리" is available for ANY severity — the user is the
@@ -448,11 +472,21 @@ export function TaskDetail({ id }: { id: string }) {
           {/* Key result — never gated behind a tab click. */}
           {task.status === "WARNING" ? (
             <Alert
-              tone="warning"
+              // Security HIGH/CRITICAL escalates the whole Alert to danger —
+              // still the same WARNING Task status underneath (no new status
+              // introduced), just a clearer visual cue than the ordinary
+              // "수정 필요" case.
+              tone={
+                attentionReason === "SECURITY_CRITICAL" || attentionReason === "SECURITY_HIGH"
+                  ? "danger"
+                  : "warning"
+              }
               title={
-                attentionReason === "REVIEW_FAILED"
-                  ? `${ATTENTION_REASON_LABEL.REVIEW_FAILED} — 검토를 완료하지 못했습니다`
-                  : `${ATTENTION_REASON_LABEL.REVIEW_NEEDS_FIX} ${warningIssueCount}건`
+                attentionReason === "SECURITY_CRITICAL" || attentionReason === "SECURITY_HIGH"
+                  ? `${ATTENTION_REASON_LABEL[attentionReason]} — Security 이슈 ${securityIssueSummary.count}건`
+                  : attentionReason === "REVIEW_FAILED"
+                    ? `${ATTENTION_REASON_LABEL.REVIEW_FAILED} — 검토를 완료하지 못했습니다`
+                    : `${ATTENTION_REASON_LABEL.REVIEW_NEEDS_FIX} ${warningIssueCount}건`
               }
               actions={
                 <>
@@ -486,17 +520,12 @@ export function TaskDetail({ id }: { id: string }) {
                 <ul className="space-y-1.5">
                   {topIssues.map((issue, i) => (
                     <li key={i} className="flex items-start gap-2">
-                      <Badge
-                        tone={
-                          issue.severity === "high"
-                            ? "danger"
-                            : issue.severity === "medium"
-                              ? "warning"
-                              : "neutral"
-                        }
-                      >
+                      <Badge tone={SEVERITY_TONE[issue.severity]}>
                         {SEVERITY_LABEL[issue.severity]}
                       </Badge>
+                      {issue.category === "SECURITY" ? (
+                        <Badge tone="info">Security</Badge>
+                      ) : null}
                       <span className="min-w-0 flex-1 break-words">
                         {issue.file ? (
                           <span className="mono text-fg-muted">{issue.file}: </span>
@@ -692,6 +721,13 @@ export function TaskDetail({ id }: { id: string }) {
                   {formatDuration(task.startedAt, task.completedAt)}
                 </span>
               </Meta>
+              {securityIssueSummary.level ? (
+                <Meta label="Security">
+                  <Badge tone={SEVERITY_TONE[securityIssueSummary.level]}>
+                    {SEVERITY_LABEL[securityIssueSummary.level]} · {securityIssueSummary.count}건
+                  </Badge>
+                </Meta>
+              ) : null}
             </dl>
           </section>
         </aside>
@@ -726,7 +762,7 @@ export function TaskDetail({ id }: { id: string }) {
         message={
           reviewIssueSummary.total > 0
             ? `${task.jobId}: 검토에서 지적 사항 ${reviewIssueSummary.total}건이 나왔습니다` +
-              ` (높음 ${reviewIssueSummary.high} · 중간 ${reviewIssueSummary.medium} · 낮음 ${reviewIssueSummary.low}).` +
+              ` (치명적 ${reviewIssueSummary.critical} · 높음 ${reviewIssueSummary.high} · 중간 ${reviewIssueSummary.medium} · 낮음 ${reviewIssueSummary.low}).` +
               ` 내용을 확인했으며 현재 결과를 완료로 처리합니다. 계속할까요?`
             : `${task.jobId}: 검토 결과를 확인했으며 현재 결과를 완료로 처리합니다. 계속할까요?`
         }

@@ -1,3 +1,5 @@
+import type { Tone } from "@/components/badge";
+import { securityReviewLevelOf } from "./types";
 import type {
   AgentName,
   ReviewIssueSeverity,
@@ -53,9 +55,18 @@ export const LINK_KIND_LABEL: Record<TaskLinkKind, string> = {
 };
 
 export const SEVERITY_LABEL: Record<ReviewIssueSeverity, string> = {
+  critical: "치명적",
   high: "높음",
   medium: "중간",
   low: "낮음",
+};
+
+/** Severity → Badge tone, centralized so ReviewPanel/task-detail/task-row never re-decide "high/critical looks dangerous" on their own. Only `danger`/`warning`/`neutral` exist as tones here — critical reuses `danger` (no dedicated tone) but is always paired with its own text label, so it never reads the same as a plain high. */
+export const SEVERITY_TONE: Record<ReviewIssueSeverity, Tone> = {
+  critical: "danger",
+  high: "danger",
+  medium: "warning",
+  low: "neutral",
 };
 
 export const ACTION_LABEL: Record<StepAction, string> = {
@@ -122,15 +133,32 @@ export function taskActivityPhrase(task: Task | TaskListItem): string {
  *
  * Deliberately a closed union rather than a free-form string: this is the
  * one place that reads `workflow.steps[]` to tell "리뷰가 지적했다" apart
- * from "리뷰 실행 자체가 실패했다" apart from "구현/분석이 실패했다", so a
- * new reason (예: 보안 이슈, 반복 수정 횟수 초과) that later becomes
- * derivable from real data gets added as one more case here — not as a new
- * `if` scattered across task-row.tsx / task-detail.tsx / task-list.tsx.
+ * from "리뷰 실행 자체가 실패했다" apart from "구현/분석이 실패했다" apart
+ * from "리뷰가 Security HIGH/CRITICAL 이슈를 지적했다", so a new reason that
+ * later becomes derivable from real data gets added as one more case here —
+ * not as a new `if` scattered across task-row.tsx / task-detail.tsx /
+ * task-list.tsx. `SECURITY_CRITICAL`/`SECURITY_HIGH` are two flat variants
+ * rather than one `SECURITY_ISSUE` + severity pair, matching how every other
+ * reason here is already its own case — every caller keyed on
+ * `AttentionReason` (the tone/order Records below, task-row.tsx,
+ * task-list.tsx) stays a plain `Record<AttentionReason, …>` instead of
+ * switching shape for one case.
  */
-export type AttentionReason = "EXECUTION_FAILED" | "REVIEW_FAILED" | "REVIEW_NEEDS_FIX";
+export type AttentionReason =
+  | "EXECUTION_FAILED"
+  | "SECURITY_CRITICAL"
+  | "SECURITY_HIGH"
+  | "REVIEW_FAILED"
+  | "REVIEW_NEEDS_FIX";
 
 export const ATTENTION_REASON_LABEL: Record<AttentionReason, string> = {
   EXECUTION_FAILED: "실행 실패",
+  // Left as the English proper-noun form ("Security Critical/High") rather
+  // than translated — this codebase already shows review outcomes as literal
+  // PASS/WARNING (see review-panel.tsx), and unambiguously names the same
+  // Issue category a Security-conscious reader of the AI handoff copy sees.
+  SECURITY_CRITICAL: "Security Critical",
+  SECURITY_HIGH: "Security High",
   REVIEW_FAILED: "리뷰 실행 실패",
   REVIEW_NEEDS_FIX: "리뷰 수정 필요",
 };
@@ -139,13 +167,27 @@ export function attentionReasonOf(task: Task | TaskListItem): AttentionReason | 
   if (task.status === "FAILED") return "EXECUTION_FAILED";
   if (task.status !== "WARNING") return null;
 
+  const reviewSteps = task.workflow.steps.filter((s) => s.action === "review");
+
+  // A HIGH/CRITICAL Security finding outranks a generic "수정 필요" or even
+  // "리뷰 실행 실패" — the whole point of surfacing Security separately is
+  // that a real, already-reported vulnerability must never read as an
+  // ordinary review nitpick. Computed from the Issues any review Step that
+  // actually produced a result reported (a FAILED review Step contributes no
+  // issues here, so it never masks a Security finding another step did
+  // produce — and a parse-failure fallback Issue never masquerades as one
+  // either, since it's always `category: "OTHER"`, not `"SECURITY"`).
+  const issues = reviewSteps.flatMap((s) => s.result?.review?.issues ?? []);
+  const securityLevel = securityReviewLevelOf(issues);
+  if (securityLevel === "critical") return "SECURITY_CRITICAL";
+  if (securityLevel === "high") return "SECURITY_HIGH";
+
   // A review Step whose own run failed (CLI error / unparseable output) is a
   // different situation from a review Step that ran fine and reported real
   // issues — the former means "이 결과를 신뢰할 수 없다", the latter means
   // "고칠 것이 있다". Prefer REVIEW_FAILED whenever any review Step is in
   // that state, even if another review Step in the same Task did produce a
   // usable WARNING result.
-  const reviewSteps = task.workflow.steps.filter((s) => s.action === "review");
   if (reviewSteps.some((s) => s.status === "FAILED")) return "REVIEW_FAILED";
   return "REVIEW_NEEDS_FIX";
 }

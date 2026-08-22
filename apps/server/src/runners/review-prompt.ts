@@ -1,4 +1,4 @@
-import type { ReviewIssue, ReviewOutcome } from "@ai-task-router/shared";
+import type { ReviewIssue, ReviewIssueCategory, ReviewOutcome } from "@ai-task-router/shared";
 
 /**
  * Shared by every agent that can run a `review` step (currently Claude and
@@ -41,7 +41,33 @@ export function buildReviewPrompt(taskTitle: string, instruction: string): strin
     `- 예외 처리 문제`,
     `- 기존 기능 회귀 가능성`,
     `- 의도하지 않은 파일 변경`,
-    `- 위험한 구현 (예: 파괴적 명령, 보안 문제)`,
+    `- 위험한 구현 (예: 파괴적 명령)`,
+    ``,
+    `보안 관점 (변경된 파일 범위 내에서, 반드시 함께 확인하라):`,
+    `- API Key / Token / Password 등 시크릿 하드코딩`,
+    `- .env 값이나 그 밖의 Secret 값 노출`,
+    `- 로그에 개인정보/민감정보 출력`,
+    `- SQL Injection`,
+    `- Command Injection`,
+    `- XSS`,
+    `- Path Traversal`,
+    `- SSRF`,
+    `- 인증 누락`,
+    `- 인가/권한 검증 누락`,
+    `- CORS 과도 허용`,
+    `- 외부 입력 검증 누락`,
+    `- 파일 업로드 검증 누락`,
+    `- unsafe eval / dynamic execution`,
+    `- shell 명령 구성 위험 (예: 사용자 입력을 그대로 셸 문자열에 삽입)`,
+    `- 취약한 암호화/해싱 사용`,
+    `- 내부 오류 메시지나 stack trace의 외부 노출`,
+    `- 응답에 민감 데이터가 그대로 반환되는 경우`,
+    `- 의존성 관련 명백한 보안 위험 (예: 알려진 취약점이 있다고 알려진 패키지의 신규 도입)`,
+    ``,
+    `단, 위 보안 관점을 확인하기 위해 npm audit, pnpm audit, Semgrep 등 별도 보안 스캐너나 lint,`,
+    `typecheck, test, build를 새로 실행하지 마라 — 이 리뷰는 변경된 파일의 내용을 직접 읽고`,
+    `판단하는 것만으로 수행한다. 위 항목에 해당하지 않는데 "혹시 모르니" 식으로 의심만으로 issue를`,
+    `만들지 마라 — 변경된 코드에서 실제로 확인되는 문제만 보고하라.`,
     ``,
     `다음은 절대 지적하지 마라:`,
     `- 취향 수준의 코드 스타일`,
@@ -67,12 +93,19 @@ export function buildReviewPrompt(taskTitle: string, instruction: string): strin
     `실제로 확인할 수 있는 상황에서 "리뷰를 수행할 수 없다"거나 "확인이 필요하다"는 이유만으로`,
     `WARNING을 반환하지 마라 — WARNING은 오직 위 리뷰 관점에 해당하는 실제 문제를 발견했을 때만`,
     `사용한다.`,
-    `문제가 있으면 result를 "WARNING"으로 하고, 각 issue에 severity/file/message를 채워라.`,
+    `문제가 있으면 result를 "WARNING"으로 하고, 각 issue에 severity/category/file/message를`,
+    `채워라. severity는 문제의 심각도에 따라 "low"/"medium"/"high"/"critical" 중 하나를 선택하라 —`,
+    `critical은 즉시 사람이 확인해야 하는 수준(예: 실제로 악용 가능한 보안 취약점, 데이터 유실/손상`,
+    `위험)에만 사용하고, 그 정도가 아니라면 high 이하로 판단하라. category는 다음 중 하나를`,
+    `반드시 선택하라: "SECURITY"(위 보안 관점에 해당하는 문제), "REQUIREMENT"(요구사항 누락),`,
+    `"CODE_QUALITY"(버그/타입/null 처리/예외 처리/회귀 등 나머지 코드 문제),`,
+    `"OTHER"(위 어느 것에도 명확히 속하지 않는 경우). 확신이 없으면 "OTHER"를 사용하라 — 절대`,
+    `"SECURITY"가 아닌 문제를 "SECURITY"로 표시하지 마라.`,
     `location(문제가 있는 줄 번호나 위치, 예: "L42" 또는 "12-18")과 suggestion(구체적인 수정 방법`,
     `제안)도 각 issue에 반드시 포함하라. 확신이 없거나 알 수 없으면 값을 생략하지 말고 반드시 null을`,
     `채워라 (location/suggestion 키 자체를 빼면 안 된다).`,
     `과도하게 넓은 범위를 다시 분석하지 말고, 변경된 파일 중심으로만 리뷰하라.`,
-    `최종 응답은 반드시 다음 JSON 스키마 형식의 JSON 객체 하나여야 한다: {"result": "PASS"|"WARNING", "issues": [{"severity": "low"|"medium"|"high", "file": string, "location": string|null, "message": string, "suggestion": string|null}]}`,
+    `최종 응답은 반드시 다음 JSON 스키마 형식의 JSON 객체 하나여야 한다: {"result": "PASS"|"WARNING", "issues": [{"severity": "low"|"medium"|"high"|"critical", "category": "SECURITY"|"REQUIREMENT"|"CODE_QUALITY"|"OTHER", "file": string, "location": string|null, "message": string, "suggestion": string|null}]}`,
     `그 외의 설명 텍스트를 앞뒤에 덧붙이지 마라. JSON 객체만 응답하라.`,
   ].join("\n");
 }
@@ -93,9 +126,10 @@ export const REVIEW_OUTPUT_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["severity", "file", "location", "message", "suggestion"],
+        required: ["severity", "category", "file", "location", "message", "suggestion"],
         properties: {
-          severity: { type: "string", enum: ["low", "medium", "high"] },
+          severity: { type: "string", enum: ["low", "medium", "high", "critical"] },
+          category: { type: "string", enum: ["SECURITY", "REQUIREMENT", "CODE_QUALITY", "OTHER"] },
           file: { type: "string" },
           location: { type: ["string", "null"] },
           message: { type: "string" },
@@ -147,14 +181,26 @@ export function parseReviewJson(
   const result = obj.result === "WARNING" ? "WARNING" : obj.result === "PASS" ? "PASS" : null;
   if (!result) return null;
 
+  const VALID_CATEGORIES: ReviewIssueCategory[] = ["SECURITY", "REQUIREMENT", "CODE_QUALITY", "OTHER"];
+
   const issuesRaw = Array.isArray(obj.issues) ? obj.issues : [];
   const issues: ReviewIssue[] = issuesRaw
     .filter((i): i is Record<string, unknown> => typeof i === "object" && i !== null)
     .map((i) => ({
       severity:
-        i.severity === "high" || i.severity === "medium" || i.severity === "low"
+        i.severity === "critical" || i.severity === "high" || i.severity === "medium" || i.severity === "low"
           ? i.severity
           : "medium",
+      // Missing/unrecognized category is left undefined rather than
+      // defaulted to "OTHER" — an older agent response (or a caller that
+      // hasn't adopted the field yet) shouldn't be forced into a category it
+      // never claimed; `securityIssuesOf` already treats undefined as "not
+      // Security", same as it treats a genuinely absent field.
+      category:
+        typeof i.category === "string" &&
+        (VALID_CATEGORIES as string[]).includes(i.category)
+          ? (i.category as ReviewIssueCategory)
+          : undefined,
       file: typeof i.file === "string" ? i.file : "",
       location: typeof i.location === "string" && i.location.trim() ? i.location : null,
       message: typeof i.message === "string" ? i.message : "",

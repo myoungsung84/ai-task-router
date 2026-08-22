@@ -33,6 +33,7 @@ export type {
   WorkflowStepSpec,
   ReviewIssue,
   ReviewIssueSeverity,
+  ReviewIssueCategory,
   ReviewOutcome,
   CreateTaskInput,
   TaskGitInfo,
@@ -56,4 +57,9 @@ export {
   generateTitleFromInstruction,
   resolveWorkflowSpecForPurpose,
   rolesForPurpose,
+  compareReviewIssueSeverity,
+  maxReviewIssueSeverity,
+  securityIssuesOf,
+  securityReviewLevelOf,
+  hasBlockingSecurityIssue,
 } from "@ai-task-router/shared";

@@ -5,6 +5,7 @@ import {
   STEP_STATUS_LABEL,
   TASK_STATUS_LABEL,
 } from "../workflow-labels";
+import { securityReviewLevelOf } from "../types";
 import type { ChangedFile, ReviewOutcome, Task, TaskLinkKind } from "../types";
 
 /** Plain-text rendering of one review Step's outcome — used by the review panel's own copy button. */
@@ -156,6 +157,27 @@ export function taskToAiHandoffText(task: Task, context: AiHandoffContext = {}):
   const reviewSteps = task.workflow.steps.filter((s) => s.result?.review);
   for (const s of reviewSteps) {
     lines.push("", `${AGENT_LABEL[s.agent]} 리뷰 요약:`, reviewOutcomeToText(s.result!.review!));
+  }
+
+  // Security Review — a dedicated, easy-to-spot section on top of the
+  // per-step review summaries above (which already list every Issue,
+  // Security ones included, inline) so a receiving AI can't miss a real
+  // Security finding buried in a longer review. Omitted entirely when there
+  // is nothing categorized "SECURITY" — a stored/parse-failure Issue with
+  // no category (or explicitly "OTHER") never lands in this section.
+  const securityIssues = task.workflow.steps
+    .flatMap((s) => s.result?.review?.issues ?? [])
+    .filter((i) => i.category === "SECURITY");
+  if (securityIssues.length > 0) {
+    const level = securityReviewLevelOf(securityIssues);
+    lines.push(
+      "",
+      level === "critical" ? "Security Review (CRITICAL 포함):" : "Security Review:",
+    );
+    for (const issue of securityIssues) {
+      const where = [issue.file, issue.location].filter(Boolean).join(":");
+      lines.push(`- ${issue.severity.toUpperCase()}: ${where ? `${where}: ` : ""}${issue.message}`);
+    }
   }
 
   if (task.error) {

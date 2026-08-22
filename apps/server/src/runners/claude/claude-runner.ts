@@ -86,6 +86,10 @@ export function runClaudeStep(
                 issues: [
                   {
                     severity: "high",
+                    // Explicitly OTHER, never left undefined — this is a
+                    // parsing failure, not a finding about the code, and must
+                    // never be mistaken for a real Security issue.
+                    category: "OTHER",
                     file: "",
                     message: "Claude 리뷰 응답에서 구조화된 결과를 파싱하지 못했습니다.",
                   },
