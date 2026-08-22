@@ -30,5 +30,14 @@ export function useSettings() {
     return updated;
   }, []);
 
-  return { settings, loading, error, refresh, updateRoles };
+  const updateAutoFix = useCallback(
+    async (autoFix: Pick<Settings, "autoFixEnabled" | "maxReviewLoops">) => {
+      const updated = await settingsApi.updateAutoFix(autoFix);
+      setSettings(updated);
+      return updated;
+    },
+    [],
+  );
+
+  return { settings, loading, error, refresh, updateRoles, updateAutoFix };
 }

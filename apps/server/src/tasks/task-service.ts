@@ -118,6 +118,8 @@ export const taskService = {
       gitInfo: null,
       parentTaskId: input.parentTaskId?.trim() || null,
       linkKind: input.linkKind ?? null,
+      acceptanceCriteria: input.acceptanceCriteria ?? null,
+      reviewLoopCount: input.reviewLoopCount ?? 0,
     };
 
     taskStore.create(task);

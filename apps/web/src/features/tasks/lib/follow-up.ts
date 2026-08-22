@@ -1,3 +1,4 @@
+import { formatReviewIssuesAsText, roleOverridesFromWorkflow } from "../types";
 import type { RoleOverrideMap } from "../components/role-override-panel";
 import type { Task, TaskLinkKind, TaskPurpose } from "../types";
 
@@ -20,33 +21,15 @@ function inferPurpose(task: Task): TaskPurpose {
   return "review";
 }
 
-/** Carries the exact Agent/model each Role used in the original Task forward as this follow-up's overrides, so a follow-up never silently switches agents just because Settings' defaults changed since. */
+/** Carries the exact Agent/model each Role used in the original Task forward as this follow-up's overrides, so a follow-up never silently switches agents just because Settings' defaults changed since. Thin wrapper over the shared `roleOverridesFromWorkflow` — the server's own Auto Fix orchestrator (`follow-up-builder.ts`) uses the exact same function, so the two never drift. */
 function overridesFromWorkflow(task: Task): RoleOverrideMap {
-  const overrides: RoleOverrideMap = {};
-  for (const step of task.workflow.steps) {
-    const role =
-      step.action === "implement"
-        ? "implementer"
-        : step.action === "analyze"
-          ? "analyzer"
-          : "reviewer";
-    if (!overrides[role]) overrides[role] = { agent: step.agent, model: step.model ?? null };
-  }
-  return overrides;
+  return roleOverridesFromWorkflow(task.workflow.steps);
 }
 
+/** Thin wrapper over the shared `formatReviewIssuesAsText` — kept as a local name since every call site below already reads `formatIssues(task)`. */
 function formatIssues(task: Task): string {
   const issues = task.workflow.steps.flatMap((s) => s.result?.review?.issues ?? []);
-  if (issues.length === 0) {
-    return "(세부 이슈 없음 — 리뷰 실행 자체가 실패했을 수 있습니다. 로그를 확인하세요.)";
-  }
-  return issues
-    .map((i) => {
-      const where = [i.file, i.location].filter(Boolean).join(":");
-      const suggestion = i.suggestion ? ` (제안: ${i.suggestion})` : "";
-      return `- [${i.severity}] ${where ? `${where}: ` : ""}${i.message}${suggestion}`;
-    })
-    .join("\n");
+  return formatReviewIssuesAsText(issues);
 }
 
 /**

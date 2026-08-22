@@ -13,6 +13,12 @@ settingsRouter.put("/roles", (req: Request<unknown, unknown, { roles?: unknown }
   res.json(updated);
 });
 
+/** Saves the Auto Review/Fix Loop toggle + its loop cap — see settingsService.updateAutoFix. */
+settingsRouter.put("/auto-fix", (req: Request, res) => {
+  const updated = settingsService.updateAutoFix(req.body);
+  res.json(updated);
+});
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 settingsRouter.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof SettingsServiceError) {

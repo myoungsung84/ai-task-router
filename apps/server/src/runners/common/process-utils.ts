@@ -16,16 +16,21 @@ import { spawn as nodeSpawn } from "node:child_process";
 export function safeSpawn(
   command: string,
   args: string[],
-  options: { cwd: string; env?: NodeJS.ProcessEnv },
+  options: { cwd: string; env?: NodeJS.ProcessEnv; stdin?: string },
 ): ChildProcess {
   const child = crossSpawn(command, args, {
     cwd: options.cwd,
     env: options.env ?? process.env,
     windowsHide: true,
   });
-  // We never pipe input to Claude/Codex. Both CLIs will otherwise wait a few
-  // seconds for stdin before giving up — closing it immediately skips that
-  // wait entirely and removes any chance of a hang on an open, never-closed pipe.
+  child.stdin?.on("error", () => {
+    // Best effort: a process that exits before consuming stdin can close the
+    // pipe early. Its exit/error event remains the authoritative failure.
+  });
+  if (options.stdin !== undefined) child.stdin?.write(options.stdin, "utf8");
+  // Always close stdin. Codex review prompts use stdin to avoid Windows'
+  // cmd.exe command-line length limit; every other invocation gets an
+  // immediate EOF so no CLI can hang waiting for interactive input.
   child.stdin?.end();
   return child;
 }

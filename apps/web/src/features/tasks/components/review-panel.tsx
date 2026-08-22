@@ -81,9 +81,25 @@ export function ReviewPanel({ title, review }: { title: string; review: ReviewOu
           <span className="text-xs text-fg-muted">
             {review.issues.length > 0 ? `지적 ${review.issues.length}건` : "지적 사항 없음"}
           </span>
+          {review.needsClarification ? <Badge tone="info">요구사항 확인 필요</Badge> : null}
+          {review.riskyChangeDetected ? <Badge tone="warning">위험 작업 감지</Badge> : null}
         </div>
         <CopyButton text={reviewOutcomeToText(review)} label="리뷰 복사" />
       </div>
+
+      {review.acceptanceCriteria && review.acceptanceCriteria.length > 0 ? (
+        <ul className="space-y-1 rounded-md border border-border p-3 text-xs">
+          {review.acceptanceCriteria.map((c) => (
+            <li key={c.id} className="flex items-start gap-2">
+              <Badge tone={c.result === "PASS" ? "success" : "danger"}>{c.result}</Badge>
+              <span className="min-w-0 flex-1 break-words text-fg-secondary">
+                {c.id}
+                {c.reason ? ` — ${c.reason}` : ""}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
 
       {generalIssues.length > 0 ? (
         <ul className="space-y-2">

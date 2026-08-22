@@ -47,6 +47,9 @@ export type {
   RoleOverride,
   RoleSettings,
   Settings,
+  AcceptanceCriterion,
+  AcceptanceCriterionResult,
+  AutoFixBlockReason,
 } from "@ai-task-router/shared";
 
 export {
@@ -62,4 +65,7 @@ export {
   securityIssuesOf,
   securityReviewLevelOf,
   hasBlockingSecurityIssue,
+  autoFixBlockReasonOf,
+  formatReviewIssuesAsText,
+  roleOverridesFromWorkflow,
 } from "@ai-task-router/shared";

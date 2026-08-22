@@ -51,6 +51,8 @@ const ATTENTION_REASON_TONE: Record<AttentionReason, Tone> = {
   EXECUTION_FAILED: "danger",
   SECURITY_CRITICAL: "danger",
   SECURITY_HIGH: "danger",
+  REVIEW_LOOP_EXCEEDED: "danger",
+  REQUIREMENT_CLARIFICATION: "warning",
   REVIEW_FAILED: "danger",
   REVIEW_NEEDS_FIX: "warning",
 };

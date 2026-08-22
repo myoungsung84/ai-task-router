@@ -12,8 +12,10 @@ import { taskStore } from "./task-store";
 import { taskEventBus } from "../stream/event-bus";
 import { prepareGitState, GitError, getChangedFiles } from "../git/git-manager";
 import { runWorkflowStep } from "../runners/agent-runner";
+import { parseAcceptanceCriteriaDefinitions } from "../runners/review-prompt";
 import { notifier } from "../notifications/notifier";
 import { generateHistoryForTask } from "../history/history-service";
+import { evaluateAndMaybeAutoFix } from "./auto-fix-service";
 
 interface ActiveRun {
   projectPathKey: string;
@@ -75,9 +77,38 @@ function notifyTerminal(task: Task): void {
   });
 }
 
-function finalizeTerminal(taskId: string, status: TaskStatus, extra: Partial<Task> = {}): void {
+/**
+ * Finalizes a Task into a terminal status: commits the status, best-effort
+ * captures `changedFilesCount` (for the Daily Summary, so it never has to
+ * re-run git per Task per view), notifies, writes history, and — only for
+ * WARNING — hands off to the Auto Review/Fix Loop via `setImmediate`.
+ *
+ * `setImmediate` is required, not just style: this function is called from
+ * inside `executeTask`'s own `try` block, and `activeRuns.delete(taskId)`
+ * only runs in `executeTask`'s `finally` block, *after* this whole call
+ * returns. Evaluating Auto Fix synchronously here would let its own
+ * `isProjectPathBusy` check see this Task's still-active entry and wrongly
+ * report the project as busy; deferring to the next event-loop turn
+ * guarantees `finally` has already run.
+ */
+async function finalizeTerminal(
+  taskId: string,
+  status: TaskStatus,
+  extra: Partial<Task> = {},
+): Promise<void> {
+  const task = taskStore.get(taskId);
+  let changedFilesCount: number | undefined;
+  if (task) {
+    try {
+      changedFilesCount = (await getChangedFiles(task.projectPath)).length;
+    } catch {
+      changedFilesCount = undefined;
+    }
+  }
+
   const updated = commitTaskStatus(taskId, status, {
     completedAt: new Date().toISOString(),
+    ...(changedFilesCount !== undefined ? { changedFilesCount } : {}),
     ...extra,
   });
   if (!updated) return;
@@ -85,9 +116,31 @@ function finalizeTerminal(taskId: string, status: TaskStatus, extra: Partial<Tas
   void generateHistoryForTask(updated).catch((err) => {
     console.error(`[task-executor] ${taskId} history 생성 실패:`, err);
   });
+
+  if (status === "WARNING") {
+    setImmediate(() => {
+      void evaluateAndMaybeAutoFix(taskId).catch((err) => {
+        console.error(`[task-executor] ${taskId} Auto Fix 평가 중 오류:`, err);
+      });
+    });
+  }
 }
 
 const agentLabel: Record<string, LogSource> = { claude: "claude", codex: "codex" };
+
+function implementationReportBefore(steps: WorkflowStep[], currentStepId: string): string | null {
+  const reports = steps
+    .slice(
+      0,
+      steps.findIndex((step) => step.id === currentStepId),
+    )
+    .filter((step) => step.action !== "review" && step.result?.summary?.trim())
+    .map(
+      (step) =>
+        `[${agentLabelKo(step.agent)} ${actionLabelKo(step.action)} / ${step.status}]\n${step.result!.summary!.trim()}`,
+    );
+  return reports.length > 0 ? reports.join("\n\n").slice(-12_000) : null;
+}
 
 /**
  * Runs every Step in the Task's workflow, in order:
@@ -96,6 +149,7 @@ const agentLabel: Record<string, LogSource> = { claude: "claude", codex: "codex"
  * there is no git diff to review. An `implement`/`analyze` Step failing
  * stops the workflow (task FAILED); a `review` Step's own execution failing
  * degrades the task to WARNING without discarding earlier Steps' results.
+ *
  * Fire-and-forget from the caller's perspective; all progress goes through
  * the task store + event bus.
  */
@@ -119,21 +173,28 @@ export async function executeTask(taskId: string, projectPathKey: string): Promi
     } catch (err) {
       const message = err instanceof GitError ? err.message : String(err);
       emitLog(taskId, makeLog("system", "stderr", `Git 준비 실패: ${message}`));
-      finalizeTerminal(taskId, "FAILED", { error: message });
+      await finalizeTerminal(taskId, "FAILED", { error: message });
       return;
     }
 
     if (run.cancelled) {
-      finalizeTerminal(taskId, "CANCELLED");
+      await finalizeTerminal(taskId, "CANCELLED");
       emitLog(taskId, makeLog("system", "info", "작업이 취소되었습니다."));
       return;
     }
 
     // ---- Steps, in order ----
-    const steps = taskStore.get(taskId)!.workflow.steps;
     let sawWarning = false;
+    let index = 0;
 
-    for (const step of steps) {
+    for (;;) {
+      const current = taskStore.get(taskId);
+      if (!current) return;
+      const steps = current.workflow.steps;
+      if (index >= steps.length) break;
+      const step = steps[index]!;
+      index++;
+
       if (run.cancelled) {
         commitStep(taskId, step.id, { status: "CANCELLED" }, "CANCELLED");
         emitLog(taskId, makeLog("system", "info", "작업이 취소되었습니다."));
@@ -192,6 +253,8 @@ export async function executeTask(taskId: string, projectPathKey: string): Promi
         taskStore.getTaskDir(taskId),
         (line) =>
           emitLog(taskId, makeLog(agentLabel[step.agent] ?? "system", line.stream, line.text)),
+        current.acceptanceCriteria,
+        step.action === "review" ? implementationReportBefore(steps, step.id) : null,
       );
       run.cancel = handle.cancel;
 
@@ -227,9 +290,11 @@ export async function executeTask(taskId: string, projectPathKey: string): Promi
 
       if (!outcome.success) {
         if (step.action === "review") {
-          // The reviewer itself failed to run/parse — don't discard earlier
-          // Steps' work. runCodexStep/runClaudeStep already synthesize a
-          // WARNING-shaped review issue explaining the failure in this case.
+          // The reviewer itself failed to run — don't discard earlier Steps'
+          // work. The runner logs the execution failure details.
+          const reviewFailureMessage = outcome.review
+            ? "리뷰 결과 파싱에 실패했습니다."
+            : "리뷰 실행에 실패했습니다.";
           commitStep(
             taskId,
             step.id,
@@ -237,18 +302,14 @@ export async function executeTask(taskId: string, projectPathKey: string): Promi
               status: "FAILED",
               completedAt: stepCompletedAt,
               result: stepResult,
-              error: "리뷰 실행에 실패했습니다.",
+              error: reviewFailureMessage,
             },
             "REVIEWING",
           );
           sawWarning = true;
           emitLog(
             taskId,
-            makeLog(
-              "system",
-              "stderr",
-              "리뷰 Step 실행에 실패했습니다. 이전 Step 결과는 유지됩니다.",
-            ),
+            makeLog("system", "stderr", `${reviewFailureMessage} 이전 Step 결과는 유지됩니다.`),
           );
           continue;
         }
@@ -261,7 +322,7 @@ export async function executeTask(taskId: string, projectPathKey: string): Promi
           { error: message },
         );
         emitLog(taskId, makeLog("system", "stderr", message));
-        finalizeTerminal(taskId, "FAILED", { error: message });
+        await finalizeTerminal(taskId, "FAILED", { error: message });
         return;
       }
 
@@ -282,10 +343,23 @@ export async function executeTask(taskId: string, projectPathKey: string): Promi
               : ""),
         ),
       );
+
       if (outcome.review?.result === "WARNING") sawWarning = true;
+
+      // Backfill Task.acceptanceCriteria once, from whatever the first
+      // review derived — later review runs (fix/re-review) then grade
+      // against this same fixed set instead of each inventing its own.
+      if (
+        step.action === "review" &&
+        outcome.review?.raw &&
+        (!current.acceptanceCriteria || current.acceptanceCriteria.length === 0)
+      ) {
+        const defs = parseAcceptanceCriteriaDefinitions(outcome.review.raw);
+        if (defs) taskStore.update(taskId, { acceptanceCriteria: defs });
+      }
     }
 
-    finalizeTerminal(taskId, sawWarning ? "WARNING" : "READY");
+    await finalizeTerminal(taskId, sawWarning ? "WARNING" : "READY");
   } finally {
     activeRuns.delete(taskId);
     taskEventBus.publish(taskId, { type: "end" });

@@ -1,4 +1,4 @@
-import type { StepAction, StepPermission } from "@ai-task-router/shared";
+import type { AcceptanceCriterion, StepAction, StepPermission } from "@ai-task-router/shared";
 import { config } from "../../config";
 import { safeSpawn, killProcessTree } from "../common/process-utils";
 import { buildReviewPrompt, parseReviewJson } from "../review-prompt";
@@ -29,8 +29,13 @@ export function runClaudeStep(
   taskTitle: string,
   cwd: string,
   onLog: (line: RunnerLogLine) => void,
+  acceptanceCriteria?: AcceptanceCriterion[] | null,
+  implementationReport?: string | null,
 ): { handle: AgentRunHandle; result: Promise<AgentRunOutcome> } {
-  const prompt = action === "review" ? buildReviewPrompt(taskTitle, instruction) : instruction;
+  const prompt =
+    action === "review"
+      ? buildReviewPrompt(taskTitle, instruction, acceptanceCriteria, implementationReport)
+      : instruction;
   const permissionMode = permission === "write" ? config.claudePermissionMode : "plan";
 
   const args = ["-p", prompt, "--permission-mode", permissionMode];
@@ -75,9 +80,15 @@ export function runClaudeStep(
 
       const parsed = success ? parseReviewJson(tailSummary) : null;
       if (!parsed) {
+        if (success) {
+          onLog({
+            stream: "stderr",
+            text: `CLAUDE_REVIEW_PARSE_FAILED: Claude CLI는 정상 종료했지만 리뷰 JSON을 파싱하지 못했습니다 (exitCode=${String(exitCode)}).`,
+          });
+        }
         resolve({
           exitCode,
-          success,
+          success: false,
           cancelled,
           summary,
           review: success

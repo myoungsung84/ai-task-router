@@ -24,4 +24,6 @@ export const settingsApi = {
   get: () => request<Settings>("/api/settings"),
   updateRoles: (roles: RoleSettings) =>
     request<Settings>("/api/settings/roles", { method: "PUT", body: JSON.stringify({ roles }) }),
+  updateAutoFix: (autoFix: Pick<Settings, "autoFixEnabled" | "maxReviewLoops">) =>
+    request<Settings>("/api/settings/auto-fix", { method: "PUT", body: JSON.stringify(autoFix) }),
 };

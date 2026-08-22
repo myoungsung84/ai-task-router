@@ -18,6 +18,18 @@ export function formatTime(iso: string | null): string {
   return d.toLocaleString();
 }
 
+/** `YYYY-MM-DD` in Asia/Seoul, regardless of the viewer's own timezone — matches the server's own day boundary for the Daily Summary (`daily-summary-service.ts`), so "오늘"/"어제" always mean the same calendar day the server aggregated. */
+export function kstDateString(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
 export function projectName(projectPath: string): string {
   const normalized = projectPath.replace(/\\/g, "/").replace(/\/+$/, "");
   const parts = normalized.split("/");

@@ -33,7 +33,9 @@ function stepTimingText(step: WorkflowStep): string | null {
   if (!step.startedAt) return null;
   const started = `시작 ${new Date(step.startedAt).toLocaleTimeString()}`;
   const duration = `소요 ${formatDuration(step.startedAt, step.completedAt)}`;
-  const ended = step.completedAt ? ` · 종료 ${new Date(step.completedAt).toLocaleTimeString()}` : "";
+  const ended = step.completedAt
+    ? ` · 종료 ${new Date(step.completedAt).toLocaleTimeString()}`
+    : "";
   return `${started}${ended} · ${duration}`;
 }
 

@@ -201,6 +201,23 @@ export function TaskDetail({ id }: { id: string }) {
     () => task?.workflow.steps.filter((s) => s.action === "review") ?? [],
     [task],
   );
+
+  // This Task's completion conditions + their latest PASS/FAIL grading (from
+  // the most recent review Step that actually graded them) — joined here
+  // once rather than in JSX, since `Task.acceptanceCriteria` (the fixed id+
+  // text definitions) and a review's own `acceptanceCriteria` (that run's
+  // grading of those same ids) are separate shapes.
+  const acceptanceCriteriaView = useMemo(() => {
+    if (!task?.acceptanceCriteria || task.acceptanceCriteria.length === 0) return [];
+    const latestGraded = [...reviewSteps]
+      .reverse()
+      .find((s) => (s.result?.review?.acceptanceCriteria?.length ?? 0) > 0);
+    const gradingById = new Map(
+      (latestGraded?.result?.review?.acceptanceCriteria ?? []).map((c) => [c.id, c]),
+    );
+    return task.acceptanceCriteria.map((c) => ({ ...c, grading: gradingById.get(c.id) ?? null }));
+  }, [task, reviewSteps]);
+
   const reviewPassed =
     task?.status === "READY" &&
     reviewSteps.length > 0 &&
@@ -486,7 +503,11 @@ export function TaskDetail({ id }: { id: string }) {
                   ? `${ATTENTION_REASON_LABEL[attentionReason]} — Security 이슈 ${securityIssueSummary.count}건`
                   : attentionReason === "REVIEW_FAILED"
                     ? `${ATTENTION_REASON_LABEL.REVIEW_FAILED} — 검토를 완료하지 못했습니다`
-                    : `${ATTENTION_REASON_LABEL.REVIEW_NEEDS_FIX} ${warningIssueCount}건`
+                    : attentionReason === "REVIEW_LOOP_EXCEEDED"
+                      ? `${ATTENTION_REASON_LABEL.REVIEW_LOOP_EXCEEDED} — 자동 수정이 더 진행되지 않습니다`
+                      : attentionReason === "REQUIREMENT_CLARIFICATION"
+                        ? `${ATTENTION_REASON_LABEL.REQUIREMENT_CLARIFICATION} — 사람의 판단이 필요합니다`
+                        : `${ATTENTION_REASON_LABEL.REVIEW_NEEDS_FIX} ${warningIssueCount}건`
               }
               actions={
                 <>
@@ -523,9 +544,7 @@ export function TaskDetail({ id }: { id: string }) {
                       <Badge tone={SEVERITY_TONE[issue.severity]}>
                         {SEVERITY_LABEL[issue.severity]}
                       </Badge>
-                      {issue.category === "SECURITY" ? (
-                        <Badge tone="info">Security</Badge>
-                      ) : null}
+                      {issue.category === "SECURITY" ? <Badge tone="info">Security</Badge> : null}
                       <span className="min-w-0 flex-1 break-words">
                         {issue.file ? (
                           <span className="mono text-fg-muted">{issue.file}: </span>
@@ -615,6 +634,34 @@ export function TaskDetail({ id }: { id: string }) {
               </button>
             ) : null}
           </Section>
+
+          {acceptanceCriteriaView.length > 0 ? (
+            <Section label="완료 조건 (Acceptance Criteria)">
+              <ul className="space-y-1.5 text-sm text-fg-secondary">
+                {acceptanceCriteriaView.map((c) => (
+                  <li key={c.id} className="flex items-start gap-2">
+                    <Badge
+                      tone={
+                        c.grading?.result === "FAIL"
+                          ? "danger"
+                          : c.grading?.result === "PASS"
+                            ? "success"
+                            : "neutral"
+                      }
+                    >
+                      {c.grading?.result ?? "미판정"}
+                    </Badge>
+                    <span className="min-w-0 flex-1 break-words">
+                      {c.text}
+                      {c.grading?.reason ? (
+                        <span className="block text-xs text-fg-muted">{c.grading.reason}</span>
+                      ) : null}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Section>
+          ) : null}
 
           {isTerminalStatus(task.status) && diffSummary && diffSummary.changedFiles.length > 0 ? (
             <Section label={`변경 파일 ${diffSummary.changedFiles.length}개`}>

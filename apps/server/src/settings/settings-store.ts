@@ -55,10 +55,24 @@ function readRoles(raw: Partial<Settings>): RoleSettings {
   return DEFAULT_ROLE_SETTINGS;
 }
 
+/** Additive — a settings.json saved before the Auto Fix Loop existed simply has neither field, so both fall back to `DEFAULT_SETTINGS`'s conservative "off, 2 loops" values rather than erroring. */
+function readAutoFix(raw: Partial<Settings>): Pick<Settings, "autoFixEnabled" | "maxReviewLoops"> {
+  const autoFixEnabled =
+    typeof raw.autoFixEnabled === "boolean" ? raw.autoFixEnabled : DEFAULT_SETTINGS.autoFixEnabled;
+  const maxReviewLoops =
+    typeof raw.maxReviewLoops === "number" &&
+    Number.isInteger(raw.maxReviewLoops) &&
+    raw.maxReviewLoops >= 1 &&
+    raw.maxReviewLoops <= 10
+      ? raw.maxReviewLoops
+      : DEFAULT_SETTINGS.maxReviewLoops;
+  return { autoFixEnabled, maxReviewLoops };
+}
+
 export function loadSettings(): Settings {
   try {
     const raw = JSON.parse(fs.readFileSync(settingsPath(), "utf8")) as Partial<Settings>;
-    return { roles: readRoles(raw) };
+    return { roles: readRoles(raw), ...readAutoFix(raw) };
   } catch {
     return DEFAULT_SETTINGS;
   }
@@ -69,5 +83,17 @@ export function saveSettings(settings: Settings): void {
   // `defaultWorkflow` is deliberately never written back — once a settings.json
   // is saved through this build it's `roles`-only; readRoles() above still
   // knows how to migrate an old file that predates this change.
-  fs.writeFileSync(settingsPath(), JSON.stringify({ roles: settings.roles }, null, 2), "utf8");
+  fs.writeFileSync(
+    settingsPath(),
+    JSON.stringify(
+      {
+        roles: settings.roles,
+        autoFixEnabled: settings.autoFixEnabled,
+        maxReviewLoops: settings.maxReviewLoops,
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
 }

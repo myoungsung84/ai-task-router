@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { StepAction, StepPermission } from "@ai-task-router/shared";
+import type { AcceptanceCriterion, StepAction, StepPermission } from "@ai-task-router/shared";
 import { config } from "../../config";
 import { safeSpawn, killProcessTree } from "../common/process-utils";
 import { REVIEW_OUTPUT_SCHEMA, buildReviewPrompt, parseReviewJson } from "../review-prompt";
@@ -29,6 +29,8 @@ export function runCodexStep(
   cwd: string,
   taskDir: string,
   onLog: (line: RunnerLogLine) => void,
+  acceptanceCriteria?: AcceptanceCriterion[] | null,
+  implementationReport?: string | null,
 ): { handle: AgentRunHandle; result: Promise<AgentRunOutcome> } {
   const sandbox: "read-only" | "workspace-write" =
     permission === "write" ? "workspace-write" : "read-only";
@@ -54,18 +56,54 @@ export function runCodexStep(
   const effectiveModel = model || config.codexModel;
   if (effectiveModel) args.push("-m", effectiveModel);
 
-  const prompt = action === "review" ? buildReviewPrompt(taskTitle, instruction) : instruction;
-  args.push(prompt);
+  const prompt =
+    action === "review"
+      ? buildReviewPrompt(taskTitle, instruction, acceptanceCriteria, implementationReport)
+      : instruction;
+  // Codex is installed as a .cmd shim on Windows. A full review prompt can
+  // exceed cmd.exe's command-line limit, so pass it through stdin (`-`) rather
+  // than as an argv element. The CLI documents `-` as "read prompt from stdin".
+  args.push("-");
 
-  const child = safeSpawn(config.codexBin, args, { cwd });
+  const child = safeSpawn(config.codexBin, args, { cwd, stdin: prompt });
 
   let cancelled = false;
   let lastAgentMessage = "";
   const stdoutBuf = { partial: "" };
-  const stderrBuf = { partial: "" };
+  let stderrBytes = Buffer.alloc(0);
+  const executionErrors: string[] = [];
 
   child.stdout?.setEncoding("utf8");
-  child.stderr?.setEncoding("utf8");
+
+  function redactSensitiveText(text: string): string {
+    return text
+      .replace(/\b(sk-[A-Za-z0-9_-]{12,})\b/g, "[REDACTED_TOKEN]")
+      .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/-]+=*/gi, "$1[REDACTED_TOKEN]")
+      .replace(
+        /\b([A-Z][A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_KEY)\s*[=:]\s*)\S+/g,
+        "$1[REDACTED]",
+      );
+  }
+
+  function decodeStderrLine(bytes: Buffer): string {
+    const clean =
+      bytes.length > 0 && bytes[bytes.length - 1] === 13 ? bytes.subarray(0, -1) : bytes;
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(clean);
+    } catch {
+      // Windows' cmd.exe writes localized wrapper errors (for example,
+      // command-line-too-long) in the active ANSI code page, CP949 on a
+      // Korean installation. WHATWG's euc-kr decoder covers CP949.
+      return new TextDecoder("euc-kr").decode(clean);
+    }
+  }
+
+  function emitStderrLine(bytes: Buffer): void {
+    if (bytes.length === 0) return;
+    const text = redactSensitiveText(decodeStderrLine(bytes));
+    executionErrors.push(text);
+    onLog({ stream: "stderr", text });
+  }
 
   // Best-effort extraction of a human-readable message out of a `type:
   // "error"` / `type: "turn.failed"` event — the exact shape isn't
@@ -115,10 +153,10 @@ export function runCodexStep(
       } else if (parsed.type === "turn.completed") {
         friendly = null; // usage stats only — not worth a log line
       } else if (parsed.type === "error") {
-        friendly = `Codex 오류: ${extractEventErrorMessage(parsed)}`;
+        friendly = `Codex 오류: ${redactSensitiveText(extractEventErrorMessage(parsed))}`;
         stream = "stderr";
       } else if (parsed.type === "turn.failed") {
-        friendly = `Codex 턴 실패: ${extractEventErrorMessage(parsed)}`;
+        friendly = `Codex 턴 실패: ${redactSensitiveText(extractEventErrorMessage(parsed))}`;
         stream = "stderr";
       }
     } catch {
@@ -134,20 +172,23 @@ export function runCodexStep(
     for (const line of parts) emitJsonLine(line);
   });
 
-  child.stderr?.on("data", (chunk: string) => {
-    const combined = stderrBuf.partial + chunk;
-    const parts = combined.split(/\r?\n/);
-    stderrBuf.partial = parts.pop() ?? "";
-    for (const line of parts) {
-      if (line.length === 0) continue;
-      onLog({ stream: "stderr", text: line });
+  child.stderr?.on("data", (chunk: Buffer) => {
+    stderrBytes = Buffer.concat([stderrBytes, chunk]);
+    let newline = stderrBytes.indexOf(10);
+    while (newline !== -1) {
+      emitStderrLine(stderrBytes.subarray(0, newline));
+      stderrBytes = stderrBytes.subarray(newline + 1);
+      newline = stderrBytes.indexOf(10);
     }
   });
 
   const result = new Promise<AgentRunOutcome>((resolve) => {
+    let finished = false;
     const finish = (exitCode: number | null) => {
+      if (finished) return;
+      finished = true;
       if (stdoutBuf.partial) emitJsonLine(stdoutBuf.partial);
-      if (stderrBuf.partial) onLog({ stream: "stderr", text: stderrBuf.partial });
+      if (stderrBytes.length > 0) emitStderrLine(stderrBytes);
 
       const success = !cancelled && exitCode === 0;
       const summary = lastAgentMessage.trim() || null;
@@ -157,35 +198,42 @@ export function runCodexStep(
         return;
       }
 
+      if (!success) {
+        if (!cancelled) {
+          const detail = executionErrors.at(-1);
+          onLog({
+            stream: "stderr",
+            text: `CODEX_EXECUTION_FAILED: Codex CLI가 비정상 종료했습니다 (exitCode=${String(exitCode)})${detail ? ` — ${detail}` : ""}`,
+          });
+        }
+        resolve({ exitCode, success: false, cancelled, summary, review: null });
+        return;
+      }
+
       const raw = lastMessagePath ? readFileSafe(lastMessagePath) : null;
-      const parsed = success && raw ? parseReviewJson(raw) : null;
+      const parsed = raw ? parseReviewJson(raw) : null;
       if (!parsed) {
         onLog({
           stream: "stderr",
-          text: `Codex 리뷰 실행/결과 파싱에 실패했습니다 (exitCode=${String(exitCode)}).`,
+          text: `CODEX_REVIEW_PARSE_FAILED: Codex CLI는 정상 종료했지만 리뷰 JSON을 파싱하지 못했습니다 (exitCode=${String(exitCode)}).`,
         });
         resolve({
           exitCode,
-          success,
+          success: false,
           cancelled,
           summary,
-          review: success
-            ? {
-                result: "WARNING",
-                issues: [
-                  {
-                    severity: "high",
-                    // Explicitly OTHER, never left undefined — this is a
-                    // parsing failure, not a finding about the code, and must
-                    // never be mistaken for a real Security issue.
-                    category: "OTHER",
-                    file: "",
-                    message: `Codex 리뷰 결과를 파싱하지 못했습니다 (exitCode=${String(exitCode)}). 로그를 확인하세요.`,
-                  },
-                ],
-                raw,
-              }
-            : null,
+          review: {
+            result: "WARNING",
+            issues: [
+              {
+                severity: "high",
+                category: "OTHER",
+                file: "",
+                message: `Codex 리뷰 결과를 파싱하지 못했습니다 (exitCode=${String(exitCode)}). 로그를 확인하세요.`,
+              },
+            ],
+            raw,
+          },
         });
         return;
       }

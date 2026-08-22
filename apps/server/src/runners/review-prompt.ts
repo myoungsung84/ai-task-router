@@ -1,11 +1,54 @@
-import type { ReviewIssue, ReviewIssueCategory, ReviewOutcome } from "@ai-task-router/shared";
+import type {
+  AcceptanceCriterion,
+  ReviewIssue,
+  ReviewIssueCategory,
+  ReviewOutcome,
+} from "@ai-task-router/shared";
+
+/** The Acceptance Criteria section of the review prompt — grading instructions when the Task already has them, derivation instructions when it doesn't (never both). */
+function acceptanceCriteriaPromptSection(
+  acceptanceCriteria: AcceptanceCriterion[] | null | undefined,
+): string[] {
+  if (acceptanceCriteria && acceptanceCriteria.length > 0) {
+    return [
+      `[완료 조건 (Acceptance Criteria)]`,
+      ...acceptanceCriteria.map((c) => `${c.id}: ${c.text}`),
+      ``,
+      `위 완료 조건 각각에 대해 이번 변경사항이 실제로 만족하는지 PASS/FAIL로 판정하라. id는 위에`,
+      `주어진 것을 그대로 사용하고, 새로 만들거나 번호를 바꾸지 마라. 하나라도 FAIL이면 전체 result는`,
+      `"WARNING"이어야 한다 (모든 완료 조건이 PASS일 때만 result가 "PASS"일 수 있다).`,
+      ``,
+    ];
+  }
+  return [
+    `[완료 조건 (Acceptance Criteria)]`,
+    `이 작업에는 미리 정의된 완료 조건이 없다. 위 작업 지시사항으로부터 이 작업이 실제로 만족해야`,
+    `하는 핵심 완료 조건을 스스로 3~7개 도출하라 — 세부 구현 방법이 아니라 사용자가 결과물을 보고`,
+    `직접 확인할 수 있는 수준으로 작성하라 (예: "기존 집계 로직을 변경하지 않는다"). 지시사항이`,
+    `단순해서 3개조차 자연스럽게 나오지 않으면 1~2개만 도출해도 된다 — 억지로 개수를 채우거나`,
+    `지나치게 잘게 쪼개지 마라. id는 "AC-1", "AC-2"... 형식으로 스스로 부여하고, 도출한 각 조건에`,
+    `대해 이번 변경사항이 만족하는지 PASS/FAIL로 판정하라. 하나라도 FAIL이면 전체 result는`,
+    `"WARNING"이어야 한다.`,
+    ``,
+  ];
+}
 
 /**
  * Shared by every agent that can run a `review` step (currently Claude and
  * Codex) so the prompt text and output parsing exist in exactly one place —
  * an agent-specific reviewer would otherwise duplicate this.
+ *
+ * `acceptanceCriteria` is the Task's own completion conditions if it has any
+ * — omit/empty and the agent derives its own from `instruction` in the same
+ * call (see `acceptanceCriteriaPromptSection`), so Acceptance Criteria never
+ * costs a second AI call.
  */
-export function buildReviewPrompt(taskTitle: string, instruction: string): string {
+export function buildReviewPrompt(
+  taskTitle: string,
+  instruction: string,
+  acceptanceCriteria?: AcceptanceCriterion[] | null,
+  implementationReport?: string | null,
+): string {
   return [
     `다음은 방금 수행된 작업에 대한 1회성 리뷰 요청이다.`,
     `리뷰 대상은 코드뿐 아니라 텍스트, 문서, 설정 파일 등 작업 지시사항에 따라 생성되거나 수정된 모든 파일이다.`,
@@ -15,6 +58,10 @@ export function buildReviewPrompt(taskTitle: string, instruction: string): strin
     `[원래 작업 지시사항 - 상세]`,
     instruction,
     ``,
+    `[구현 Agent 결과 보고]`,
+    implementationReport?.trim() || "(구현/분석 Step 결과 보고 없음)",
+    ``,
+    ...acceptanceCriteriaPromptSection(acceptanceCriteria),
     `git status, git diff 등을 직접 실행해 커밋되지 않은 현재 working tree 변경사항을 파악하라.`,
     `리뷰 범위는 오직 그 변경사항에 포함된 파일들뿐이다. git diff는 새로 추가된(untracked) 파일의`,
     `내용을 보여주지 않으므로, untracked 파일은 반드시 직접 열어서 내용을 읽고 정상적인 리뷰`,
@@ -42,6 +89,20 @@ export function buildReviewPrompt(taskTitle: string, instruction: string): strin
     `- 기존 기능 회귀 가능성`,
     `- 의도하지 않은 파일 변경`,
     `- 위험한 구현 (예: 파괴적 명령)`,
+    `- 변경 범위가 작업 지시사항에 비해 과도하거나 부족한지`,
+    `- 작업 지시사항이 검증 명령이나 검증 결과 보고를 명시적으로 요구했다면, 위 [구현 Agent 결과`,
+    `  보고]에 해당 명령을 실행했다는 내용과 성공/실패 결과가 빠짐없이 포함되어 있는지`,
+    ``,
+    `검증 수행 여부 판단 규칙:`,
+    `- Reviewer가 lint, typecheck, test, build나 다른 검증 명령을 직접 실행하지 마라.`,
+    `- 작업 지시사항 또는 완료 조건이 특정 검증을 요구한 경우에만 구현 Agent의 결과 보고에서 그`,
+    `  수행 여부와 결과를 확인하라. 명시적으로 요구된 검증의 실행 또는 결과 보고가 누락되었다면`,
+    `  REQUIREMENT 또는 CODE_QUALITY issue와 WARNING으로 판정하라.`,
+    `- 구현 Agent가 검증 실패를 보고했다면 숨기거나 PASS로 간주하지 말고, 변경사항의 신뢰성에`,
+    `  영향을 주는 실제 문제로 보고하라.`,
+    `- 작업 지시사항이 검증을 요구하지 않았다면 검증 결과가 없다는 이유만으로 issue를 만들지 마라.`,
+    `- 결과 보고는 수행 여부를 판단하는 근거이며, 보고 내용과 실제 diff가 모순되면 그 모순을`,
+    `  REQUIREMENT 또는 CODE_QUALITY issue로 보고하라.`,
     ``,
     `보안 관점 (변경된 파일 범위 내에서, 반드시 함께 확인하라):`,
     `- API Key / Token / Password 등 시크릿 하드코딩`,
@@ -104,8 +165,20 @@ export function buildReviewPrompt(taskTitle: string, instruction: string): strin
     `location(문제가 있는 줄 번호나 위치, 예: "L42" 또는 "12-18")과 suggestion(구체적인 수정 방법`,
     `제안)도 각 issue에 반드시 포함하라. 확신이 없거나 알 수 없으면 값을 생략하지 말고 반드시 null을`,
     `채워라 (location/suggestion 키 자체를 빼면 안 된다).`,
+    ``,
+    `needsClarification: 요구사항 자체가 모호하거나, 서로 다른 요구사항이 상충하거나, 여러 구현`,
+    `방식 중 사용자가 직접 선택해야 하는 문제라서 "코드를 더 고친다고" 해결되지 않는다고 판단되면`,
+    `true로, 그렇지 않으면 false로 응답하라. 단순히 구현이 부족하거나 버그가 있는 경우는 여기 해당`,
+    `하지 않는다 (그건 issue로만 보고하라) — needsClarification은 오직 "사람의 판단/선택이 반드시`,
+    `필요하다"고 확신할 때만 true로 하라.`,
+    `riskyChangeDetected: 이 WARNING을 고치려면 DB Migration, 데이터/대량 파일 삭제, 인증·인가`,
+    `정책 변경, Secret/환경 설정 변경, 배포·인프라 관련 변경 중 하나가 필요하다고 판단되면 true로,`,
+    `그렇지 않으면 false로 응답하라.`,
     `과도하게 넓은 범위를 다시 분석하지 말고, 변경된 파일 중심으로만 리뷰하라.`,
-    `최종 응답은 반드시 다음 JSON 스키마 형식의 JSON 객체 하나여야 한다: {"result": "PASS"|"WARNING", "issues": [{"severity": "low"|"medium"|"high"|"critical", "category": "SECURITY"|"REQUIREMENT"|"CODE_QUALITY"|"OTHER", "file": string, "location": string|null, "message": string, "suggestion": string|null}]}`,
+    `최종 응답은 반드시 다음 JSON 스키마 형식의 JSON 객체 하나여야 한다: {"result": "PASS"|"WARNING", "issues": [{"severity": "low"|"medium"|"high"|"critical", "category": "SECURITY"|"REQUIREMENT"|"CODE_QUALITY"|"OTHER", "file": string, "location": string|null, "message": string, "suggestion": string|null}], "acceptanceCriteria": [{"id": string, "text": string, "result": "PASS"|"FAIL", "reason": string|null}], "needsClarification": boolean, "riskyChangeDetected": boolean}`,
+    `acceptanceCriteria는 위 [완료 조건] 섹션에서 판정/도출한 항목을 모두 포함해야 하며, 완료 조건이`,
+    `전혀 없다고 스스로 판단했다면 빈 배열로 응답하라. text는 기존에 주어진 조건이면 그대로, 새로`,
+    `도출했다면 방금 만든 문구를 그대로 채워라.`,
     `그 외의 설명 텍스트를 앞뒤에 덧붙이지 마라. JSON 객체만 응답하라.`,
   ].join("\n");
 }
@@ -118,7 +191,7 @@ export function buildReviewPrompt(taskTitle: string, instruction: string): strin
 export const REVIEW_OUTPUT_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["result", "issues"],
+  required: ["result", "issues", "acceptanceCriteria", "needsClarification", "riskyChangeDetected"],
   properties: {
     result: { type: "string", enum: ["PASS", "WARNING"] },
     issues: {
@@ -137,6 +210,22 @@ export const REVIEW_OUTPUT_SCHEMA = {
         },
       },
     },
+    acceptanceCriteria: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "text", "result", "reason"],
+        properties: {
+          id: { type: "string" },
+          text: { type: "string" },
+          result: { type: "string", enum: ["PASS", "FAIL"] },
+          reason: { type: ["string", "null"] },
+        },
+      },
+    },
+    needsClarification: { type: "boolean" },
+    riskyChangeDetected: { type: "boolean" },
   },
 };
 
@@ -163,12 +252,10 @@ export function extractLastJsonObject(text: string): string | null {
   return null;
 }
 
-export function parseReviewJson(
-  raw: string,
-): Pick<ReviewOutcome, "result" | "issues" | "raw"> | null {
+/** Parses the trailing JSON object out of `raw` — the shared first step both `parseReviewJson` and `parseAcceptanceCriteriaDefinitions` build on, so the extraction/parse logic exists exactly once. */
+function parseReviewObject(raw: string): Record<string, unknown> | null {
   const jsonText = extractLastJsonObject(raw);
   if (!jsonText) return null;
-
   let data: unknown;
   try {
     data = JSON.parse(jsonText);
@@ -176,19 +263,38 @@ export function parseReviewJson(
     return null;
   }
   if (typeof data !== "object" || data === null) return null;
+  return data as Record<string, unknown>;
+}
 
-  const obj = data as Record<string, unknown>;
-  const result = obj.result === "WARNING" ? "WARNING" : obj.result === "PASS" ? "PASS" : null;
+export function parseReviewJson(
+  raw: string,
+): Pick<
+  ReviewOutcome,
+  "result" | "issues" | "raw" | "acceptanceCriteria" | "needsClarification" | "riskyChangeDetected"
+> | null {
+  const obj = parseReviewObject(raw);
+  if (!obj) return null;
+
+  let result: "PASS" | "WARNING" | null =
+    obj.result === "WARNING" ? "WARNING" : obj.result === "PASS" ? "PASS" : null;
   if (!result) return null;
 
-  const VALID_CATEGORIES: ReviewIssueCategory[] = ["SECURITY", "REQUIREMENT", "CODE_QUALITY", "OTHER"];
+  const VALID_CATEGORIES: ReviewIssueCategory[] = [
+    "SECURITY",
+    "REQUIREMENT",
+    "CODE_QUALITY",
+    "OTHER",
+  ];
 
   const issuesRaw = Array.isArray(obj.issues) ? obj.issues : [];
   const issues: ReviewIssue[] = issuesRaw
     .filter((i): i is Record<string, unknown> => typeof i === "object" && i !== null)
     .map((i) => ({
       severity:
-        i.severity === "critical" || i.severity === "high" || i.severity === "medium" || i.severity === "low"
+        i.severity === "critical" ||
+        i.severity === "high" ||
+        i.severity === "medium" ||
+        i.severity === "low"
           ? i.severity
           : "medium",
       // Missing/unrecognized category is left undefined rather than
@@ -197,8 +303,7 @@ export function parseReviewJson(
       // never claimed; `securityIssuesOf` already treats undefined as "not
       // Security", same as it treats a genuinely absent field.
       category:
-        typeof i.category === "string" &&
-        (VALID_CATEGORIES as string[]).includes(i.category)
+        typeof i.category === "string" && (VALID_CATEGORIES as string[]).includes(i.category)
           ? (i.category as ReviewIssueCategory)
           : undefined,
       file: typeof i.file === "string" ? i.file : "",
@@ -207,5 +312,53 @@ export function parseReviewJson(
       suggestion: typeof i.suggestion === "string" && i.suggestion.trim() ? i.suggestion : null,
     }));
 
-  return { result, issues, raw };
+  const acceptanceCriteriaRaw = Array.isArray(obj.acceptanceCriteria) ? obj.acceptanceCriteria : [];
+  const acceptanceCriteria = acceptanceCriteriaRaw
+    .filter((c): c is Record<string, unknown> => typeof c === "object" && c !== null)
+    .map((c) => ({
+      id: typeof c.id === "string" && c.id.trim() ? c.id : "",
+      result: c.result === "FAIL" ? ("FAIL" as const) : ("PASS" as const),
+      reason: typeof c.reason === "string" && c.reason.trim() ? c.reason : null,
+    }))
+    .filter((c) => c.id !== "");
+
+  // Defensive invariant, not just a prompt instruction: a required Criterion
+  // that FAILed can never coexist with an overall PASS, regardless of what
+  // the agent itself answered for `result`.
+  if (result === "PASS" && acceptanceCriteria.some((c) => c.result === "FAIL")) {
+    result = "WARNING";
+  }
+
+  return {
+    result,
+    issues,
+    raw,
+    acceptanceCriteria: acceptanceCriteria.length > 0 ? acceptanceCriteria : null,
+    needsClarification: obj.needsClarification === true,
+    riskyChangeDetected: obj.riskyChangeDetected === true,
+  };
+}
+
+/**
+ * Extracts just `{id, text}` from the same review JSON `parseReviewJson`
+ * reads — used exactly once per Task, right after its first review, to
+ * backfill `Task.acceptanceCriteria` when the Task didn't supply its own
+ * (see `buildReviewPrompt`'s derivation instructions). Kept as a separate
+ * function rather than added to `parseReviewJson`'s return shape because
+ * `Task.acceptanceCriteria` (the fixed id+text definitions) and
+ * `ReviewOutcome.acceptanceCriteria` (one run's PASS/FAIL grading of those
+ * same ids) are deliberately different shapes.
+ */
+export function parseAcceptanceCriteriaDefinitions(raw: string): AcceptanceCriterion[] | null {
+  const obj = parseReviewObject(raw);
+  if (!obj) return null;
+  const rawList = Array.isArray(obj.acceptanceCriteria) ? obj.acceptanceCriteria : [];
+  const defs = rawList
+    .filter((c): c is Record<string, unknown> => typeof c === "object" && c !== null)
+    .map((c) => ({
+      id: typeof c.id === "string" && c.id.trim() ? c.id : "",
+      text: typeof c.text === "string" && c.text.trim() ? c.text : "",
+    }))
+    .filter((c) => c.id !== "" && c.text !== "");
+  return defs.length > 0 ? defs : null;
 }

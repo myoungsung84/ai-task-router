@@ -71,12 +71,62 @@ export interface ReviewIssue {
   category?: ReviewIssueCategory | null;
 }
 
+/**
+ * One completion condition for a Task — minimal on purpose (`id`+`text`
+ * only; see `AcceptanceCriterionResult` for the per-review PASS/FAIL
+ * grading, kept separate so the criteria themselves never get rewritten by
+ * a later review run). Either supplied by the Task's creator (REST/MCP
+ * `CreateTaskInput.acceptanceCriteria`) or, when omitted, derived by the
+ * reviewing agent itself from the instruction on the first review — see
+ * `buildReviewPrompt` — and then backfilled onto `Task.acceptanceCriteria`
+ * once, so later review runs (fix/re-review loops) grade against the same
+ * fixed set instead of each inventing its own.
+ */
+export interface AcceptanceCriterion {
+  id: string;
+  text: string;
+}
+
+/** One Acceptance Criterion's PASS/FAIL verdict from a single review run — lives on that run's `ReviewOutcome`, not on the Task itself, since a re-review can change the verdict without changing the criterion's `text`. */
+export interface AcceptanceCriterionResult {
+  id: string;
+  result: "PASS" | "FAIL";
+  /** Best-effort explanation from the reviewing agent. Omitted when it gave none. */
+  reason?: string | null;
+}
+
 /** Structured outcome of a `review`-action step. */
 export interface ReviewOutcome {
   result: "PASS" | "WARNING";
   issues: ReviewIssue[];
   /** Raw text the agent produced, kept for debugging when structured parsing fails partially. */
   raw?: string | null;
+  /**
+   * Per-Acceptance-Criterion PASS/FAIL from this review run. Optional/additive
+   * — absent when the Task has no Acceptance Criteria (nothing to grade) or
+   * on a review stored before this field existed. `parseReviewJson` forces
+   * `result` to "WARNING" whenever any entry here is "FAIL", regardless of
+   * what the agent itself answered for `result` — a required Criterion
+   * failing can never coexist with an overall PASS.
+   */
+  acceptanceCriteria?: AcceptanceCriterionResult[] | null;
+  /**
+   * The reviewing agent's own explicit signal that this WARNING needs a
+   * human decision rather than a mechanical fix — the requirement itself is
+   * ambiguous, the user needs to choose between options, or two parts of the
+   * instruction conflict. Only ever set from the agent's own structured
+   * answer (see buildReviewPrompt) — never inferred/guessed from message
+   * text — so it stays exactly as reliable as any other review field.
+   */
+  needsClarification?: boolean;
+  /**
+   * The reviewing agent's own explicit signal that fixing this WARNING would
+   * plausibly require a risky change (DB migration, data/file deletion,
+   * auth/permission changes, secret/env changes, deploy/infra changes) —
+   * same "agent states it explicitly" contract as `needsClarification`. Used
+   * to keep the Auto Fix Loop from attempting a fix on its own in that case.
+   */
+  riskyChangeDetected?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -96,10 +146,7 @@ const REVIEW_SEVERITY_RANK: Record<ReviewIssueSeverity, number> = {
 };
 
 /** Never compare `ReviewIssueSeverity` values by string/alphabetical order — this is the one place the LOW < MEDIUM < HIGH < CRITICAL ranking lives. */
-export function compareReviewIssueSeverity(
-  a: ReviewIssueSeverity,
-  b: ReviewIssueSeverity,
-): number {
+export function compareReviewIssueSeverity(a: ReviewIssueSeverity, b: ReviewIssueSeverity): number {
   return REVIEW_SEVERITY_RANK[a] - REVIEW_SEVERITY_RANK[b];
 }
 
@@ -132,6 +179,76 @@ export function securityReviewLevelOf(issues: ReviewIssue[]): ReviewIssueSeverit
 export function hasBlockingSecurityIssue(issues: ReviewIssue[]): boolean {
   const level = securityReviewLevelOf(issues);
   return level === "high" || level === "critical";
+}
+
+/** Why the Auto Review/Fix Loop will not attempt (or continue) an automatic fix — every case here is Auto Loop 안전 규칙 1-4 (max loops, Security HIGH/CRITICAL, ambiguous requirement, risky change), in priority order. `null` means none of these apply (an automatic fix may be attempted, subject to Settings.autoFixEnabled). */
+export type AutoFixBlockReason =
+  "LOOP_EXCEEDED" | "SECURITY_BLOCKING" | "NEEDS_CLARIFICATION" | "RISKY_CHANGE";
+
+/**
+ * The single place every Auto Loop safety rule is checked before an
+ * automatic fix Task is created — both the server's own orchestrator and
+ * (should it ever need to explain "why not") any other caller reuse this
+ * rather than re-deriving the same four conditions. `reviewLoopCount`/
+ * `maxReviewLoops` are compared with `>=` (an original Task starts at 0, so
+ * `maxReviewLoops: 2` allows exactly 2 automatic fix attempts before this
+ * returns `"LOOP_EXCEEDED"`).
+ */
+export function autoFixBlockReasonOf(
+  review: ReviewOutcome | null | undefined,
+  reviewLoopCount: number,
+  maxReviewLoops: number,
+): AutoFixBlockReason | null {
+  if (reviewLoopCount >= maxReviewLoops) return "LOOP_EXCEEDED";
+  if (!review) return null;
+  if (hasBlockingSecurityIssue(review.issues)) return "SECURITY_BLOCKING";
+  if (review.needsClarification) return "NEEDS_CLARIFICATION";
+  if (review.riskyChangeDetected) return "RISKY_CHANGE";
+  return null;
+}
+
+/**
+ * Plain-text bullet rendering of a set of Review Issues — the one place this
+ * exists so the web "후속 작업" prefill (`follow-up.ts`) and the server's own
+ * Auto Fix follow-up instruction builder never duplicate the same
+ * `- [severity] file:location: message (제안: ...)` formatting.
+ */
+export function formatReviewIssuesAsText(issues: ReviewIssue[]): string {
+  if (issues.length === 0) {
+    return "(세부 이슈 없음 — 리뷰 실행 자체가 실패했을 수 있습니다. 로그를 확인하세요.)";
+  }
+  return issues
+    .map((i) => {
+      const where = [i.file, i.location].filter(Boolean).join(":");
+      const suggestion = i.suggestion ? ` (제안: ${i.suggestion})` : "";
+      return `- [${i.severity}] ${where ? `${where}: ` : ""}${i.message}${suggestion}`;
+    })
+    .join("\n");
+}
+
+/**
+ * Carries forward the exact Agent/model each Role used in `task`'s own
+ * Workflow, as a `roleOverrides` map for a follow-up Task — so a follow-up
+ * (manual or automatic) never silently switches Agent just because Settings'
+ * defaults changed since the original ran. Shared by the web "후속 작업"
+ * prefill and the server's Auto Fix orchestrator, neither of which may import
+ * the other's platform-specific code.
+ */
+export function roleOverridesFromWorkflow(
+  steps: Pick<WorkflowStep, "action" | "agent" | "model">[],
+): Partial<Record<TaskRole, RoleOverride>> {
+  const overrides: Partial<Record<TaskRole, RoleOverride>> = {};
+  for (const step of steps) {
+    const role: TaskRole | null =
+      step.action === "implement"
+        ? "implementer"
+        : step.action === "analyze"
+          ? "analyzer"
+          : "reviewer";
+    if (role && !overrides[role])
+      overrides[role] = { agent: step.agent, model: step.model ?? null };
+  }
+  return overrides;
 }
 
 export interface WorkflowStepResult {
@@ -325,6 +442,28 @@ export interface Task {
   /** Present only when parentTaskId is set — describes what kind of follow-up this is. */
   linkKind: TaskLinkKind | null;
 
+  /**
+   * This Task's completion conditions — either supplied at creation, or (when
+   * omitted) left `null`/empty until the first review run derives and
+   * backfills them (see `AcceptanceCriterion`, `buildReviewPrompt`). A
+   * fix/re-review follow-up carries its parent's set forward unchanged, so
+   * every review in the same chain grades against the same Criteria.
+   */
+  acceptanceCriteria?: AcceptanceCriterion[] | null;
+  /**
+   * How many automatic Auto Fix Loop iterations produced this Task — 0 (or
+   * absent) for every user/MCP-created Task, including a *manually* created
+   * "수정 후 재검토" follow-up. Only the server's own Auto Fix orchestrator
+   * ever sets this above 0, which doubles as "was this Task auto-created" —
+   * an explicit stored count rather than something re-derived by walking
+   * `parentTaskId` every time (see `autoFixBlockReasonOf`).
+   */
+  reviewLoopCount?: number;
+  /** Set (once, true) by the Auto Fix orchestrator when this WARNING Task's own chain has already used up `Settings.maxReviewLoops` automatic attempts — the one authoritative signal the web UI's Needs Attention reason ("REVIEW_LOOP_EXCEEDED") reads, instead of re-comparing `reviewLoopCount` against Settings itself. */
+  reviewLoopExceeded?: boolean;
+  /** Changed-file count captured once at Task completion (best-effort — omitted if git couldn't be queried at that moment), reused by the Daily Summary so it never has to re-run git per Task per view. */
+  changedFilesCount?: number;
+
   /** @deprecated legacy fixed-pipeline fields — undefined/null on every new Task, populated only when a pre-workflow stored Task is loaded. Do not read these in new code; use `workflow.steps` instead. */
   claudeStatus?: RunnerStatus;
   /** @deprecated see claudeStatus */
@@ -361,6 +500,10 @@ export interface CreateTaskInput {
   /** Set when this Task is a WARNING follow-up created from another Task. */
   parentTaskId?: string | null;
   linkKind?: TaskLinkKind | null;
+  /** This Task's completion conditions — optional; omit to let the first review run derive them from `instruction` instead (see `Task.acceptanceCriteria`). */
+  acceptanceCriteria?: AcceptanceCriterion[] | null;
+  /** Internal — set only by the server's own Auto Fix orchestrator when it creates a follow-up Task; not part of the REST/MCP `taskSpecShape` input, so an external caller can never set this directly. */
+  reviewLoopCount?: number;
 }
 
 export interface ChangedFile {
@@ -406,6 +549,17 @@ export function statusGroupOf(status: TaskStatus): StatusGroup {
 export interface Settings {
   /** Agent + model for each of the three Roles — what `resolveWorkflowSpecForPurpose` builds a Task's Workflow from when the Task itself doesn't override a Role. */
   roles: RoleSettings;
+  /**
+   * Auto Review/Fix Loop — off by default. When true, a WARNING Task whose
+   * review is a plain fixable WARNING (no blocking Security issue, no
+   * `needsClarification`/`riskyChangeDetected`, and under `maxReviewLoops`
+   * attempts so far — see `autoFixBlockReasonOf`) automatically gets a
+   * `fix_and_rereview` follow-up Task created and started, instead of
+   * waiting for a person to do it from the Task Detail screen.
+   */
+  autoFixEnabled: boolean;
+  /** Maximum automatic fix attempts in one chain before the Auto Fix Loop stops and leaves the Task as an ordinary WARNING for a person (see `Task.reviewLoopExceeded`). Global for now — no per-Project/Task override. */
+  maxReviewLoops: number;
   /** @deprecated pre-Role Settings shape (a single hand-built default Workflow). Kept only so an already-stored settings.json keeps typechecking; `settings-store.ts` migrates it into `roles` on load and never writes it again. */
   defaultWorkflow?: WorkflowSpec;
 }
@@ -424,4 +578,42 @@ export const DEFAULT_ROLE_SETTINGS: RoleSettings = {
 
 export const DEFAULT_SETTINGS: Settings = {
   roles: DEFAULT_ROLE_SETTINGS,
+  autoFixEnabled: false,
+  maxReviewLoops: 2,
 };
+
+// ---------------------------------------------------------------------------
+// Daily History / Digest — a date-based (Asia/Seoul) aggregation over
+// `taskStore.list()`, computed on demand by the server (see
+// `daily-summary-service.ts`), never stored — so this shape is purely a wire
+// contract between that endpoint and the Dashboard's "오늘 요약" view.
+// ---------------------------------------------------------------------------
+
+/** One Task as needed for a Daily Summary's "주요 작업 목록" — deliberately just enough to link to it and show its outcome, not the full `Task`. */
+export interface DailySummaryTaskRef {
+  jobId: string;
+  title: string;
+  status: TaskStatus;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface DailySummary {
+  /** `YYYY-MM-DD`, Asia/Seoul calendar date this summary covers. */
+  date: string;
+  totalTasks: number;
+  completed: number;
+  needsAttention: number;
+  failed: number;
+  claudeRuns: number;
+  codexReviews: number;
+  securityHigh: number;
+  securityCritical: number;
+  autoFixRuns: number;
+  changedFilesCount: number;
+  /** Sum of `completedAt - startedAt` across every Task that has both, in ms. `null` when no Task that day has both timestamps. */
+  totalDurationMs: number | null;
+  tasks: DailySummaryTaskRef[];
+  /** Deterministic (non-AI) Korean sentence summarizing the above — see `daily-summary-service.ts`. */
+  narrativeSummary: string;
+}

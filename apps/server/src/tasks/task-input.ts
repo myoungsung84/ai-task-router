@@ -75,6 +75,16 @@ export const taskSpecShape = {
     .nullable()
     .optional()
     .describe("parentTaskId가 있을 때 후속 조치 종류 (선택)"),
+  acceptanceCriteria: z
+    .array(z.object({ id: z.string().min(1), text: z.string().min(1) }))
+    .nullable()
+    .optional()
+    .describe(
+      "이 Task의 완료 조건 목록 (선택). 생략하면 첫 리뷰 실행 시 지시사항으로부터 자동으로 도출된다.",
+    ),
+  // reviewLoopCount is deliberately NOT part of this shape — it's set only by
+  // the server's own Auto Fix orchestrator when it creates a follow-up Task
+  // directly via taskService.createTask, never by an external REST/MCP caller.
 };
 
 export const taskSpecSchema = z.object(taskSpecShape);

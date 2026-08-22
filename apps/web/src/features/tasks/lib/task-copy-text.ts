@@ -138,7 +138,9 @@ export function taskToAiHandoffText(task: Task, context: AiHandoffContext = {}):
   lines.push("", "작업 내용:", task.instruction);
 
   const stepLines = task.workflow.steps.map((s) => {
-    const suffix = s.skipReason ? ` (${s.skipReason === "NO_CHANGES" ? "변경 없음" : "레거시"})` : "";
+    const suffix = s.skipReason
+      ? ` (${s.skipReason === "NO_CHANGES" ? "변경 없음" : "레거시"})`
+      : "";
     let line = `- ${AGENT_LABEL[s.agent]} ${ACTION_LABEL[s.action]} ${STEP_STATUS_LABEL[s.status]}${suffix}`;
     if (s.result?.review) {
       line += `: ${s.result.review.result}${s.result.review.issues.length ? ` (지적 ${s.result.review.issues.length}건)` : ""}`;
@@ -149,14 +151,54 @@ export function taskToAiHandoffText(task: Task, context: AiHandoffContext = {}):
     lines.push("", "현재 진행 상태:", ...stepLines);
   }
 
-  const summarySteps = task.workflow.steps.filter((s) => s.action !== "review" && s.result?.summary);
+  const summarySteps = task.workflow.steps.filter(
+    (s) => s.action !== "review" && s.result?.summary,
+  );
   for (const s of summarySteps) {
-    lines.push("", `${AGENT_LABEL[s.agent]} ${ACTION_LABEL[s.action]} 결과 요약:`, s.result!.summary!);
+    lines.push(
+      "",
+      `${AGENT_LABEL[s.agent]} ${ACTION_LABEL[s.action]} 결과 요약:`,
+      s.result!.summary!,
+    );
   }
 
   const reviewSteps = task.workflow.steps.filter((s) => s.result?.review);
   for (const s of reviewSteps) {
     lines.push("", `${AGENT_LABEL[s.agent]} 리뷰 요약:`, reviewOutcomeToText(s.result!.review!));
+  }
+
+  // Acceptance Criteria — this Task's fixed completion conditions plus the
+  // most recent review's PASS/FAIL grading of them. Omitted entirely when
+  // the Task has none (most Tasks today, until a review derives its own).
+  if (task.acceptanceCriteria && task.acceptanceCriteria.length > 0) {
+    const latestGraded = [...reviewSteps]
+      .reverse()
+      .find((s) => (s.result?.review?.acceptanceCriteria?.length ?? 0) > 0);
+    const gradingById = new Map(
+      (latestGraded?.result?.review?.acceptanceCriteria ?? []).map((c) => [c.id, c]),
+    );
+    lines.push("", "완료 조건 (Acceptance Criteria):");
+    for (const c of task.acceptanceCriteria) {
+      const grading = gradingById.get(c.id);
+      const verdict = grading ? grading.result : "미판정";
+      lines.push(
+        `- [${verdict}] ${c.id}: ${c.text}${grading?.reason ? ` — ${grading.reason}` : ""}`,
+      );
+    }
+  }
+
+  // Auto Review/Fix Loop — only when this Task chain actually used it (an
+  // ordinary user/MCP-created Task has `reviewLoopCount` 0/absent and this
+  // section is skipped entirely).
+  if ((task.reviewLoopCount ?? 0) > 0 || task.reviewLoopExceeded) {
+    lines.push(
+      "",
+      "Auto Review/Fix Loop:",
+      `- 자동 수정 횟수: ${task.reviewLoopCount ?? 0}회`,
+      task.reviewLoopExceeded
+        ? "- 자동 수정 한도를 초과해 중단되었습니다."
+        : "- 자동 수정 진행 중/가능",
+    );
   }
 
   // Security Review — a dedicated, easy-to-spot section on top of the
@@ -170,10 +212,7 @@ export function taskToAiHandoffText(task: Task, context: AiHandoffContext = {}):
     .filter((i) => i.category === "SECURITY");
   if (securityIssues.length > 0) {
     const level = securityReviewLevelOf(securityIssues);
-    lines.push(
-      "",
-      level === "critical" ? "Security Review (CRITICAL 포함):" : "Security Review:",
-    );
+    lines.push("", level === "critical" ? "Security Review (CRITICAL 포함):" : "Security Review:");
     for (const issue of securityIssues) {
       const where = [issue.file, issue.location].filter(Boolean).join(":");
       lines.push(`- ${issue.severity.toUpperCase()}: ${where ? `${where}: ` : ""}${issue.message}`);

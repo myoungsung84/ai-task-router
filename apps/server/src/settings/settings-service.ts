@@ -37,6 +37,26 @@ function parseRoles(input: unknown): RoleSettings {
   return roles;
 }
 
+function parseAutoFix(input: unknown): Pick<Settings, "autoFixEnabled" | "maxReviewLoops"> {
+  if (!input || typeof input !== "object") {
+    throw new SettingsServiceError("autoFixEnabled, maxReviewLoops가 필요합니다.");
+  }
+  const obj = input as Record<string, unknown>;
+  if (typeof obj.autoFixEnabled !== "boolean") {
+    throw new SettingsServiceError("autoFixEnabled는 boolean이어야 합니다.");
+  }
+  const maxReviewLoops = obj.maxReviewLoops;
+  if (
+    typeof maxReviewLoops !== "number" ||
+    !Number.isInteger(maxReviewLoops) ||
+    maxReviewLoops < 1 ||
+    maxReviewLoops > 10
+  ) {
+    throw new SettingsServiceError("maxReviewLoops는 1~10 사이의 정수여야 합니다.");
+  }
+  return { autoFixEnabled: obj.autoFixEnabled, maxReviewLoops };
+}
+
 export const settingsService = {
   get(): Settings {
     cached ??= loadSettings();
@@ -46,7 +66,16 @@ export const settingsService = {
   /** Replaces every Role's Agent/model in one call — Settings' role cards always save the full set together so a stale partial update can't leave one Role pointing at mismatched state. */
   updateRoles(rolesInput: unknown): Settings {
     const roles = parseRoles(rolesInput);
-    const settings: Settings = { roles };
+    const settings: Settings = { ...(cached ?? loadSettings()), roles };
+    cached = settings;
+    saveSettings(settings);
+    return settings;
+  },
+
+  /** Auto Review/Fix Loop toggle + its loop cap — saved together, same "whole group at once" spirit as updateRoles. */
+  updateAutoFix(input: unknown): Settings {
+    const autoFix = parseAutoFix(input);
+    const settings: Settings = { ...(cached ?? loadSettings()), ...autoFix };
     cached = settings;
     saveSettings(settings);
     return settings;

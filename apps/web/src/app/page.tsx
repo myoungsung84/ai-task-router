@@ -1,5 +1,11 @@
 import { TaskList } from "@/features/tasks/components/task-list";
+import { TodaySummary } from "@/features/history/components/today-summary";
 
 export default function DashboardPage() {
-  return <TaskList />;
+  return (
+    <div className="space-y-6">
+      <TodaySummary />
+      <TaskList />
+    </div>
+  );
 }

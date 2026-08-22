@@ -148,6 +148,8 @@ export type AttentionReason =
   | "EXECUTION_FAILED"
   | "SECURITY_CRITICAL"
   | "SECURITY_HIGH"
+  | "REVIEW_LOOP_EXCEEDED"
+  | "REQUIREMENT_CLARIFICATION"
   | "REVIEW_FAILED"
   | "REVIEW_NEEDS_FIX";
 
@@ -159,6 +161,8 @@ export const ATTENTION_REASON_LABEL: Record<AttentionReason, string> = {
   // Issue category a Security-conscious reader of the AI handoff copy sees.
   SECURITY_CRITICAL: "Security Critical",
   SECURITY_HIGH: "Security High",
+  REVIEW_LOOP_EXCEEDED: "자동 수정 한도 초과",
+  REQUIREMENT_CLARIFICATION: "요구사항 확인 필요",
   REVIEW_FAILED: "리뷰 실행 실패",
   REVIEW_NEEDS_FIX: "리뷰 수정 필요",
 };
@@ -169,18 +173,31 @@ export function attentionReasonOf(task: Task | TaskListItem): AttentionReason | 
 
   const reviewSteps = task.workflow.steps.filter((s) => s.action === "review");
 
-  // A HIGH/CRITICAL Security finding outranks a generic "수정 필요" or even
-  // "리뷰 실행 실패" — the whole point of surfacing Security separately is
-  // that a real, already-reported vulnerability must never read as an
-  // ordinary review nitpick. Computed from the Issues any review Step that
-  // actually produced a result reported (a FAILED review Step contributes no
-  // issues here, so it never masks a Security finding another step did
-  // produce — and a parse-failure fallback Issue never masquerades as one
-  // either, since it's always `category: "OTHER"`, not `"SECURITY"`).
+  // A HIGH/CRITICAL Security finding outranks every other reason below — the
+  // whole point of surfacing Security separately is that a real,
+  // already-reported vulnerability must never read as an ordinary review
+  // nitpick. Computed from the Issues any review Step that actually produced
+  // a result reported (a FAILED review Step contributes no issues here, so it
+  // never masks a Security finding another step did produce — and a
+  // parse-failure fallback Issue never masquerades as one either, since it's
+  // always `category: "OTHER"`, not `"SECURITY"`).
   const issues = reviewSteps.flatMap((s) => s.result?.review?.issues ?? []);
   const securityLevel = securityReviewLevelOf(issues);
   if (securityLevel === "critical") return "SECURITY_CRITICAL";
   if (securityLevel === "high") return "SECURITY_HIGH";
+
+  // Set once, authoritatively, by the server's own Auto Fix orchestrator when
+  // this WARNING Task's chain has already used up Settings.maxReviewLoops
+  // automatic attempts — read directly rather than re-deriving the threshold
+  // comparison here (see shared `autoFixBlockReasonOf`/`Task.reviewLoopExceeded`).
+  if (task.reviewLoopExceeded === true) return "REVIEW_LOOP_EXCEEDED";
+
+  // The reviewing agent's own explicit signal that a human decision is
+  // needed — never inferred from message text (see `ReviewOutcome.needsClarification`).
+  const reviewResults = reviewSteps
+    .map((s) => s.result?.review)
+    .filter((r): r is NonNullable<typeof r> => !!r);
+  if (reviewResults.some((r) => r.needsClarification === true)) return "REQUIREMENT_CLARIFICATION";
 
   // A review Step whose own run failed (CLI error / unparseable output) is a
   // different situation from a review Step that ran fine and reported real
@@ -189,5 +206,6 @@ export function attentionReasonOf(task: Task | TaskListItem): AttentionReason | 
   // that state, even if another review Step in the same Task did produce a
   // usable WARNING result.
   if (reviewSteps.some((s) => s.status === "FAILED")) return "REVIEW_FAILED";
+
   return "REVIEW_NEEDS_FIX";
 }
