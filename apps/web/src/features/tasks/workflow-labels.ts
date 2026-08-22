@@ -114,3 +114,38 @@ export function taskActivityPhrase(task: Task | TaskListItem): string {
       return "실행 취소됨";
   }
 }
+
+/**
+ * Why a Task sits in the "확인 필요" (attention) group — derived purely from
+ * data already on the Task, never guessed. Only WARNING/FAILED ever produce
+ * a reason; every other status is `null` (안 확인해도 되는 Task).
+ *
+ * Deliberately a closed union rather than a free-form string: this is the
+ * one place that reads `workflow.steps[]` to tell "리뷰가 지적했다" apart
+ * from "리뷰 실행 자체가 실패했다" apart from "구현/분석이 실패했다", so a
+ * new reason (예: 보안 이슈, 반복 수정 횟수 초과) that later becomes
+ * derivable from real data gets added as one more case here — not as a new
+ * `if` scattered across task-row.tsx / task-detail.tsx / task-list.tsx.
+ */
+export type AttentionReason = "EXECUTION_FAILED" | "REVIEW_FAILED" | "REVIEW_NEEDS_FIX";
+
+export const ATTENTION_REASON_LABEL: Record<AttentionReason, string> = {
+  EXECUTION_FAILED: "실행 실패",
+  REVIEW_FAILED: "리뷰 실행 실패",
+  REVIEW_NEEDS_FIX: "리뷰 수정 필요",
+};
+
+export function attentionReasonOf(task: Task | TaskListItem): AttentionReason | null {
+  if (task.status === "FAILED") return "EXECUTION_FAILED";
+  if (task.status !== "WARNING") return null;
+
+  // A review Step whose own run failed (CLI error / unparseable output) is a
+  // different situation from a review Step that ran fine and reported real
+  // issues — the former means "이 결과를 신뢰할 수 없다", the latter means
+  // "고칠 것이 있다". Prefer REVIEW_FAILED whenever any review Step is in
+  // that state, even if another review Step in the same Task did produce a
+  // usable WARNING result.
+  const reviewSteps = task.workflow.steps.filter((s) => s.action === "review");
+  if (reviewSteps.some((s) => s.status === "FAILED")) return "REVIEW_FAILED";
+  return "REVIEW_NEEDS_FIX";
+}

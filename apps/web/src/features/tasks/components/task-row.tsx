@@ -6,8 +6,15 @@ import { Play, Square, Trash2 } from "lucide-react";
 import { cn, formatDuration, projectName } from "@/lib/format";
 import { IconButton } from "@/components/button";
 import { AgentAvatar } from "@/components/agent-icon";
+import { Badge, type Tone } from "@/components/badge";
 import { TaskStatusBadge } from "./task-status-badge";
-import { AGENT_LABEL, taskActivityPhrase } from "../workflow-labels";
+import {
+  AGENT_LABEL,
+  ATTENTION_REASON_LABEL,
+  attentionReasonOf,
+  taskActivityPhrase,
+  type AttentionReason,
+} from "../workflow-labels";
 import { useTask } from "../hooks/use-task";
 import { useNowTick } from "../hooks/use-now-tick";
 import type { TaskListItem } from "../types";
@@ -37,6 +44,13 @@ const COL = {
 
 const ROW_BASE =
   "group relative flex cursor-pointer items-center gap-4 px-4 transition-colors duration-fast hover:bg-fg/[0.03]";
+
+/** Reason chip tone — REVIEW_NEEDS_FIX reads softer (지적 사항, still fixable from the review itself) than the two "이 결과를 신뢰할 수 없다" cases. */
+const ATTENTION_REASON_TONE: Record<AttentionReason, Tone> = {
+  EXECUTION_FAILED: "danger",
+  REVIEW_FAILED: "danger",
+  REVIEW_NEEDS_FIX: "warning",
+};
 
 function truncateResult(text: string): string {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -113,6 +127,7 @@ function RowShell({
   className?: string;
 }) {
   const result = resultLine(task);
+  const attentionReason = attentionReasonOf(task);
   const agents = Array.from(new Set(task.workflow.steps.map((s) => s.agent)));
   return (
     <div className={cn(ROW_BASE, extra ? "py-3" : "py-2.5", className)}>
@@ -142,6 +157,11 @@ function RowShell({
         </div>
         <p className="mt-0.5 flex min-w-0 items-baseline gap-1.5 text-xs">
           <span className="mono shrink-0 text-fg-faint">{task.jobId}</span>
+          {attentionReason ? (
+            <Badge tone={ATTENTION_REASON_TONE[attentionReason]} className="shrink-0">
+              {ATTENTION_REASON_LABEL[attentionReason]}
+            </Badge>
+          ) : null}
           <span
             className={cn(
               "min-w-0 truncate",

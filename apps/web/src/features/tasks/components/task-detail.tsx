@@ -38,11 +38,13 @@ import { cn, formatDuration, formatTime } from "@/lib/format";
 import {
   AGENT_LABEL,
   ACTION_LABEL,
+  ATTENTION_REASON_LABEL,
   LINK_KIND_LABEL,
   SEVERITY_LABEL,
+  attentionReasonOf,
   taskActivityPhrase,
 } from "../workflow-labels";
-import { taskToCopyText } from "../lib/task-copy-text";
+import { taskToCopyText, taskToAiHandoffText } from "../lib/task-copy-text";
 import { buildFollowUpPrefill } from "../lib/follow-up";
 import { isTerminalStatus } from "../types";
 import type { TaskDiff, TaskLinkKind } from "../types";
@@ -129,6 +131,10 @@ export function TaskDetail({ id }: { id: string }) {
     return task.workflow.steps.reduce((sum, s) => sum + (s.result?.review?.issues.length ?? 0), 0);
   }, [task]);
 
+  // Same "확인 필요 사유" mapper the Task list uses — the Detail hero should
+  // never diverge from the list on why this Task needs attention.
+  const attentionReason = task ? attentionReasonOf(task) : null;
+
   // Severity breakdown across every review step's issues — used both to
   // decide whether "검토 후 완료 처리" makes sense and to spell out exactly
   // what's being signed off on in the confirm dialog.
@@ -195,6 +201,32 @@ export function TaskDetail({ id }: { id: string }) {
     if (ancestors.length === 0 && children.length === 0) return null;
     return { ancestors, children };
   }, [allTasks, task]);
+
+  // Same lineage data, reshaped for WorkflowTimeline's "관련 Task" block —
+  // the immediate parent's `linkKind` is *this* Task's own linkKind (it
+  // describes how this Task relates to its parent), while each child's
+  // `linkKind` is that child's own (it describes how the child relates to
+  // this Task).
+  const timelineRelations = useMemo(() => {
+    if (!task) return undefined;
+    const immediateParent = lineage?.ancestors[lineage.ancestors.length - 1] ?? null;
+    return {
+      parent: immediateParent ? { jobId: immediateParent.jobId, linkKind: task.linkKind } : null,
+      children: (lineage?.children ?? []).map((c) => ({ jobId: c.jobId, linkKind: c.linkKind })),
+    };
+  }, [task, lineage]);
+
+  // "AI 전달용 복사" — reuses the same relation data as the Timeline's
+  // "관련 Task" block and the already-fetched diff summary, so this never
+  // triggers an extra request just to build a copy-paste string.
+  const aiHandoffText = useMemo(() => {
+    if (!task) return "";
+    return taskToAiHandoffText(task, {
+      parent: timelineRelations?.parent,
+      children: timelineRelations?.children,
+      changedFiles: diffSummary?.changedFiles,
+    });
+  }, [task, timelineRelations, diffSummary]);
 
   if (notFound) {
     return (
@@ -386,6 +418,7 @@ export function TaskDetail({ id }: { id: string }) {
               {isQueued ? "대기 취소" : "실행 중단"}
             </Button>
           ) : null}
+          <CopyButton text={aiHandoffText} label="AI 전달용 복사" />
           <CopyButton text={taskToCopyText(task)} label="전체 복사" />
           {deletable ? (
             <IconButton
@@ -417,9 +450,9 @@ export function TaskDetail({ id }: { id: string }) {
             <Alert
               tone="warning"
               title={
-                warningIssueCount > 0
-                  ? `검토 지적 사항 ${warningIssueCount}건`
-                  : "검토를 완료하지 못했습니다"
+                attentionReason === "REVIEW_FAILED"
+                  ? `${ATTENTION_REASON_LABEL.REVIEW_FAILED} — 검토를 완료하지 못했습니다`
+                  : `${ATTENTION_REASON_LABEL.REVIEW_NEEDS_FIX} ${warningIssueCount}건`
               }
               actions={
                 <>
@@ -487,7 +520,7 @@ export function TaskDetail({ id }: { id: string }) {
           ) : task.status === "FAILED" ? (
             <Alert
               tone="danger"
-              title="실행 실패"
+              title={ATTENTION_REASON_LABEL.EXECUTION_FAILED}
               actions={
                 <Button
                   variant="outline"
@@ -627,7 +660,7 @@ export function TaskDetail({ id }: { id: string }) {
         <aside className="min-w-0 space-y-6 lg:sticky lg:top-[4.5rem] lg:self-start">
           <section className="space-y-3">
             <SectionLabel>진행 단계</SectionLabel>
-            <WorkflowTimeline workflow={task.workflow} />
+            <WorkflowTimeline workflow={task.workflow} relations={timelineRelations} />
           </section>
 
           <section className="space-y-3 border-t border-border pt-5">

@@ -14,6 +14,11 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { useToast } from "@/components/toast";
 import { projectName } from "@/lib/format";
 import { statusGroupOf } from "../types";
+import {
+  ATTENTION_REASON_LABEL,
+  attentionReasonOf,
+  type AttentionReason,
+} from "../workflow-labels";
 import type { TaskListItem } from "../types";
 
 const SECTION_LABEL: Record<"active" | "attention" | "done", string> = {
@@ -21,6 +26,27 @@ const SECTION_LABEL: Record<"active" | "attention" | "done", string> = {
   attention: "확인 필요",
   done: "완료",
 };
+
+// Display order for the "확인 필요" section's reason breakdown — most
+// actionable-by-the-user-right-now first.
+const ATTENTION_REASON_ORDER: AttentionReason[] = [
+  "REVIEW_NEEDS_FIX",
+  "REVIEW_FAILED",
+  "EXECUTION_FAILED",
+];
+
+/** "리뷰 수정 필요 2 · 실행 실패 1" — omits any reason with zero Tasks. `null` when nothing to break down (e.g. a lone Task, or reasons not yet derivable). */
+function attentionBreakdownText(items: TaskListItem[]): string | null {
+  const counts: Partial<Record<AttentionReason, number>> = {};
+  for (const t of items) {
+    const reason = attentionReasonOf(t);
+    if (reason) counts[reason] = (counts[reason] ?? 0) + 1;
+  }
+  const parts = ATTENTION_REASON_ORDER.filter((r) => counts[r]).map(
+    (r) => `${ATTENTION_REASON_LABEL[r]} ${counts[r]}`,
+  );
+  return parts.length > 1 ? parts.join(" · ") : null;
+}
 
 export function TaskList() {
   const { tasks, loading, error, refresh } = useTaskList();
@@ -187,6 +213,11 @@ export function TaskList() {
                     <div className="flex items-center gap-2 bg-fg/[0.02] px-4 py-1.5 text-xs font-medium text-fg-muted">
                       {SECTION_LABEL[section.key]}
                       <span className="mono text-fg-faint">{section.items.length}</span>
+                      {section.key === "attention" ? (
+                        <span className="font-normal text-fg-faint">
+                          {attentionBreakdownText(section.items)}
+                        </span>
+                      ) : null}
                     </div>
                   ) : null}
                   {section.items.map((t) =>
