@@ -163,6 +163,12 @@ Endpoint:
 http://localhost:9914/mcp
 ```
 
+저장소 루트의 `.mcp.json`이 이 엔드포인트를 프로젝트 스코프로 등록합니다.
+Claude Code는 이 저장소를 열면 자동으로 잡습니다(최초 1회 승인 필요).
+
+논의방은 이 설정이 특히 중요합니다 — 참가자 **전원**이 같은 엔드포인트를
+봐야 하고, 한쪽만 등록돼 있으면 그쪽 차례에서 라운드가 멈춥니다(아래 참고).
+
 (공식 MCP TypeScript SDK의 Streamable HTTP transport, 세션 기반. 대시보드용
 REST API(`/api/tasks/*`)와 동일한 `TaskService`/Task Store를 공유하므로, MCP로
 만든 Task도 대시보드에 즉시 나타나고 그 반대도 마찬가지입니다.)
@@ -203,6 +209,41 @@ REST API(`/api/tasks/*`)와 동일한 `TaskService`/Task Store를 공유하므�
 > "역할(Role)" 절이 필요한 인터페이스 전부입니다 — 서버 쪽 스키마는
 > `apps/server/src/tasks/task-input.ts`(`taskSpecShape`)에 정의돼 있고, MCP
 > `run_task`/`run_tasks` 도구 설명에도 동일한 내용이 그대로 노출됩니다.
+
+### 논의방 Tools
+
+Task와 별도 도메인입니다. 논의는 코드를 고치지 않습니다 — 논의 중 파일 수정,
+테스트 실행, 브랜치 변경, 커밋은 하지 않으며 그 도구 자체가 없습니다.
+
+- `create_discussion` — 논의방과 원본 문서 생성. `repos`는 필수이고 **여러 개가
+  기본**입니다(AI의 조사 범위이기도 해서, 여기 없는 저장소는 읽지 않습니다).
+- `list_discussions` — 목록 조회.
+- `read_discussion_document` — 원본 문서 전체. **발언 전에 반드시 읽습니다.**
+  `agent`를 함께 넘기면 방 화면의 `문서 읽음` 노드가 켜집니다.
+- `claim_discussion_turn` — 내 차례인지 + 기준 `revision` 확인.
+- `submit_discussion_turn` — 턴 제출. 새 근거가 없으면 `grounds: false`로 두면
+  아무것도 기록되지 않고 `입장 유지`로 표시됩니다.
+- `add_discussion_repo` — 조사 범위에 저장소 추가.
+
+판단은 도구에 없습니다. 무엇을 말할지, 입장을 유지할지, 사용자 문장이 결정인지는
+전부 [`docs/discussion-skill.md`](docs/discussion-skill.md)에 있습니다. Claude
+Code는 `.claude/skills/discussion/SKILL.md`가 이 파일을 가리키고, Codex 등 다른
+참가자도 같은 파일을 봅니다.
+
+문서는 append-only 마크다운 한 파일입니다(`DISCUSSIONS_DIR`, 기본
+`<DATA_DIR>/discussions`). 항목 번호는 영구 앵커라 `#47` 같은 인용이 깨지지
+않습니다. 설계 배경은 [`docs/discussion-room-ux.md`](docs/discussion-room-ux.md).
+
+#### 시작하는 법
+
+1. `pnpm run dev`
+2. 참가자 **양쪽 모두**에 MCP 등록 (Claude Code는 `.mcp.json`으로 자동, Codex는
+   자체 설정에 같은 엔드포인트 추가)
+3. Claude나 Codex 창에서 그대로 요청 — "이 안건으로 논의방 만들자"
+
+> **한쪽만 등록하면 라운드가 멈춥니다.** 라운드는 참여자 전원이 턴을 제출해야
+> 닫히고 타임아웃이 없습니다. 등록되지 않은 참가자의 차례에서 방이 멈추며,
+> 방 화면의 `라운드 중단`으로만 풀 수 있습니다.
 
 ### ChatGPT Desktop에 연결하기
 

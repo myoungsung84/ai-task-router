@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ai-task-router": {
+      "type": "http",
+      "url": "http://localhost:9914/mcp"
+    }
+  }
+}
