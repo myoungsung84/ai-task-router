@@ -2,6 +2,7 @@ import { config } from "./config";
 import { createApp } from "./server/app";
 import { taskStore } from "./tasks/task-store";
 import { recoverInterruptedTasks } from "./tasks/recover-interrupted";
+import { discussionService } from "./discussions/discussion-service";
 
 taskStore.init();
 
@@ -14,6 +15,12 @@ if (recovered.length > 0) {
     `[server] 이전 실행이 중단된 Task ${recovered.length}건을 실패 처리했습니다: ${recovered.join(", ")}`,
   );
 }
+
+// Discussion documents are append-only files; nothing needs recovering the way
+// an interrupted Task does, because nothing was left in a state that lies. The
+// schedule that *was* lost — whose turn it was — is memory by design, and a
+// room whose round was cut short says 재개 필요 rather than resuming on its own.
+discussionService.init();
 
 const app = createApp();
 

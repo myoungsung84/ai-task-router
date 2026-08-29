@@ -17,6 +17,26 @@ export const config = {
     ? path.resolve(process.env.DATA_DIR)
     : path.resolve(__dirname, "..", "data"),
 
+  /**
+   * Where discussion documents are appended.
+   *
+   * A default, not a fixed path. Deployments keep their official record
+   * elsewhere (a work-log tree, say), and when they do the file naming and
+   * layout follow that convention rather than this one. Everything the store
+   * writes resolves under this root and nothing may escape it, so an agent
+   * cannot name an absolute path of its own — otherwise the registered
+   * repository list, which is supposed to bound what an AI reads, means
+   * nothing.
+   */
+  discussionsDir: process.env.DISCUSSIONS_DIR
+    ? path.resolve(process.env.DISCUSSIONS_DIR)
+    : path.resolve(
+        process.env.DATA_DIR
+          ? path.resolve(process.env.DATA_DIR)
+          : path.resolve(__dirname, "..", "data"),
+        "discussions",
+      ),
+
   claudeBin: process.env.CLAUDE_BIN ?? "claude",
   codexBin: process.env.CODEX_BIN ?? "codex",
 

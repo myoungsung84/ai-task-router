@@ -7,6 +7,7 @@ import { projectRouter } from "../projects/project-routes";
 import { mcpRouter, activeMcpSessionCount } from "../mcp/mcp-router";
 import { MCP_TOOL_NAMES } from "../mcp/mcp-server";
 import { dailySummaryRouter } from "../history/daily-summary-routes";
+import { discussionRouter } from "../discussions/discussion-routes";
 
 export function createApp() {
   const app = express();
@@ -30,6 +31,7 @@ export function createApp() {
   app.use("/api/settings", dashboardCors, settingsRouter);
   app.use("/api/projects", dashboardCors, projectRouter);
   app.use("/api/history", dashboardCors, dailySummaryRouter);
+  app.use("/api/discussions", dashboardCors, discussionRouter);
 
   // MCP endpoint: deliberately more permissive. This is a local-only dev
   // tool (see docs/architecture.md); MCP clients are typically not browser
