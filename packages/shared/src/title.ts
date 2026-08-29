@@ -7,8 +7,11 @@
  * produced anyway.
  *
  * No AI call: this only needs to be "short and clear enough to recognize the
- * Task in a list", not a perfect summary — a cheap heuristic is the right
- * tool so title generation stays instant and available offline.
+ * Task in a list", not a perfect summary — a cheap heuristic is the right tool
+ * so title generation stays instant and available offline. It is also only
+ * ever a *default*: the create form pre-fills it for editing and a Task can be
+ * renamed afterwards, so being occasionally wrong here is recoverable rather
+ * than permanent.
  */
 
 const ACTION_KEYWORDS: { pattern: RegExp; label: string }[] = [
@@ -24,27 +27,82 @@ const MAX_TITLE_LENGTH = 60;
 const FALLBACK_TITLE = "새 Task";
 
 /**
- * Backtick-quoted spans first (`\`auth.ts\``), then bare path-like tokens
- * with a file extension. The negative lookahead excludes a mid-path
- * directory segment that merely contains a dot (e.g. "01.src" inside
- * "D:\01.src\home\tools-hub") — only a token *not* immediately followed by
- * another path separator counts as a plausible leaf filename.
+ * The one backslash literal in this file, built from its code point so no
+ * pattern below needs an escaped backslash.
+ *
+ * That escape is what broke the previous implementation: its "leaf filename"
+ * class was written with both separators, degraded to forward-slash-only, and
+ * so matched an entire Windows path as a single token — which is how list rows
+ * ended up titled "01.src\home\tools-hub\ai-task-router-smoke-20260822.txt, ai…".
  */
-function extractFileNames(text: string): string[] {
-  const backticked = [...text.matchAll(/`([^`\n]{1,80})`/g)].map((m) => m[1]!);
-  const bare = [...text.matchAll(/\b[\w][\w./\\-]*\.[A-Za-z0-9]{1,8}\b(?![\\/])/g)].map(
-    (m) => m[0],
-  );
-  const combined = [...backticked, ...bare]
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0 && s.length <= 60);
-  return Array.from(new Set(combined)).slice(0, 2);
+const BACKSLASH = String.fromCharCode(92);
+
+/** Both separators become `/`, so every pattern here is written against one. */
+function normalizeSeparators(text: string): string {
+  return text.split(BACKSLASH).join("/");
+}
+
+/**
+ * Drive-anchored Windows paths, which may contain spaces ("C:/Program Files/…").
+ *
+ * A space is only accepted *inside* a directory segment — one that the
+ * lookahead proves is followed by another separator. The final segment stays
+ * space-free, so "D:/src/a.ts 참고해서" gives up the path and keeps the prose
+ * rather than swallowing the rest of the sentence. Matched before `PATH_RUN`
+ * because that pattern would otherwise cut this path in half at the space and
+ * leave "C:/Program" behind as the title.
+ */
+const DRIVE_PATH_RUN = /[A-Za-z]:(?:\/[\w.~-]+(?: [\w.~-]+)*(?=\/))*\/[\w.~-]+/g;
+
+/** A run of path-ish characters holding at least one separator. */
+const PATH_RUN = /(?:[A-Za-z]:)?\/?[\w.~-]+(?:\/[\w.~-]+)+\/?/g;
+
+/**
+ * Zero-width and other format/control characters. They survive `trim()`, so a
+ * title made only of them counts as "non-empty" and defeats the guarantee that
+ * every Task is identifiable in a list.
+ */
+const INVISIBLE = /[\p{Cf}\p{Cc}]/gu;
+
+/** Strips characters that take no space, so emptiness checks mean what they say. */
+export function stripInvisible(text: string): string {
+  return text.replace(INVISIBLE, "");
+}
+
+/** Punctuation stranded at the front once a path is cut out of a phrase. */
+const LEADING_PUNCT = /^[\s,.;:·\-–—]+/u;
+
+/**
+ * A Korean particle stranded at the front for the same reason ("`a/b.ts` 의
+ * 로직" → "의 로직"). Only applied when a path really was removed: at the start
+ * of ordinary prose these are demonstratives, and "이 프로젝트 구조 파악" must
+ * not become "프로젝트 구조 파악"'s poorer sibling by losing its subject.
+ */
+const LEADING_PARTICLE = /^(?:의|를|을|이|가|은|는|에서|에|으로|로)\s+/u;
+
+/** Politeness endings carry no meaning in a list and cost scarce title length. */
+const TRAILING_REQUEST =
+  /\s*(?:해\s*줘|해\s*주세요|해줘요|해주라|하라|해라|바랍니다|부탁\S*)\s*[.!]?$/u;
+
+/** The leaf of a path — for callers that want the filename, not the whole run. */
+export function baseName(pathLike: string): string {
+  const parts = normalizeSeparators(pathLike).replace(/\/+$/, "").split("/");
+  return parts[parts.length - 1] || pathLike;
 }
 
 function truncate(title: string, max = MAX_TITLE_LENGTH): string {
   const trimmed = title.replace(/\s+/g, " ").trim();
   if (trimmed.length <= max) return trimmed;
   return trimmed.slice(0, max - 1).trimEnd() + "…";
+}
+
+function tidy(text: string, pathWasRemoved: boolean): string {
+  let out = text.replace(/\s+/g, " ").trim().replace(LEADING_PUNCT, "");
+  if (pathWasRemoved) out = out.replace(LEADING_PARTICLE, "");
+  return out
+    .replace(TRAILING_REQUEST, "")
+    .replace(/[\s,.;:]+$/u, "")
+    .trim();
 }
 
 /**
@@ -67,25 +125,50 @@ function detectAction(text: string): string | null {
   return bestLabel;
 }
 
+/**
+ * Intent first.
+ *
+ * The first sentence of the first non-empty line is the title candidate,
+ * because people say what they want before piling on detail. Paths are removed
+ * rather than promoted — the Task row already carries its 프로젝트 in its own
+ * column — and only resurface as a bare filename when stripping them left
+ * nothing else to say.
+ */
 export function generateTitleFromInstruction(instruction: string): string {
-  const text = (instruction ?? "").trim();
+  const text = stripInvisible(instruction ?? "").trim();
   if (!text) return FALLBACK_TITLE;
 
+  const normalized = normalizeSeparators(text);
+  const firstLine = normalized.split(/\r?\n/).find((l) => l.trim().length > 0) ?? "";
+
+  // Backticks come off but their contents stay — `auth.ts` is often the only
+  // concrete noun in a short instruction.
+  const unquoted = firstLine.replace(/`([^`\n]{1,80})`/g, "$1");
+  // Drive-anchored paths first: they may contain spaces, which PATH_RUN would
+  // cut in half (leaving "C:/Program" as the title of a "C:/Program Files/…"
+  // instruction).
+  const paths = [...(unquoted.match(DRIVE_PATH_RUN) ?? [])];
+  const afterDrives = unquoted.replace(DRIVE_PATH_RUN, " ");
+  paths.push(...(afterDrives.match(PATH_RUN) ?? []));
+  const withoutPaths = afterDrives.replace(PATH_RUN, " ");
+
+  // Detail after the first full stop is elaboration, not the title.
+  const firstSentence = withoutPaths.split(/(?<=[.!?。])\s+/)[0] ?? withoutPaths;
+  const candidate = firstSentence.trim().length >= 4 ? firstSentence : withoutPaths;
+  const cleaned = tidy(candidate, paths.length > 0);
+
+  if (cleaned.length >= 4) return truncate(cleaned);
+
+  // Too little prose survived. Lead with the filename that was carrying the
+  // meaning, and append whatever intent we can name — deduplicated, so
+  // "src/x/Button.tsx 삭제" cannot come back as "삭제 삭제".
+  const leaf = paths.length > 0 ? baseName(paths[0]!) : "";
   const action = detectAction(text);
-  const files = extractFileNames(text);
+  const tail = cleaned || action || "";
 
-  let title: string;
-  if (files.length > 0 && action) {
-    title = `${files.join(", ")} ${action}`;
-  } else if (files.length > 0) {
-    title = files.join(", ");
-  } else if (action) {
-    const firstLine = text.split(/\r?\n/)[0]!.trim();
-    title = `${action}: ${firstLine}`;
-  } else {
-    title = text.split(/\r?\n/)[0]!.trim();
-  }
+  if (leaf && tail && !leaf.includes(tail)) return truncate(`${leaf} ${tail}`);
+  if (leaf) return truncate(leaf);
+  if (tail) return truncate(tail);
 
-  const result = truncate(title);
-  return result || FALLBACK_TITLE;
+  return truncate(tidy(normalized, false)) || FALLBACK_TITLE;
 }

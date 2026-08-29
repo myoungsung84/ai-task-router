@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Plus, Settings2 } from "lucide-react";
 import { NewTaskModal } from "@/features/tasks/components/new-task-modal";
+import { ControlTower } from "@/features/agents/components/control-tower";
 import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/button";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -59,6 +60,13 @@ export function AppHeader() {
           </Button>
         </div>
       </div>
+      {/*
+        The control tower rides along with the header rather than living on the
+        dashboard, so the workspace's condition is present on every screen and
+        never scrolls out of reach. It renders a single line while idle, so a
+        quiet workspace costs one row.
+      */}
+      <ControlTower />
       <NewTaskModal open={newTaskOpen} onClose={() => setNewTaskOpen(false)} />
     </header>
   );

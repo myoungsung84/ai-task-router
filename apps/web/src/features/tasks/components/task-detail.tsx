@@ -19,12 +19,13 @@ import { useTaskList } from "../hooks/use-task-list";
 import { useNowTick } from "../hooks/use-now-tick";
 import { tasksApi } from "../api/tasks-api";
 import { TaskStatusBadge } from "./task-status-badge";
+import { TaskTitle } from "./task-title";
 import { WorkflowTimeline } from "./workflow-timeline";
+import { AgentStrip } from "@/features/agents/components/agent-strip";
 import { TaskActivityLog } from "./task-activity-log";
 import { ReviewPanel } from "./review-panel";
 import { TaskDiffView } from "./task-diff-view";
 import { NewTaskModal } from "./new-task-modal";
-import { AgentAvatar } from "@/components/agent-icon";
 import { Button, IconButton } from "@/components/button";
 import { SectionLabel } from "@/components/card";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -90,8 +91,8 @@ function Section({
 export function TaskDetail({ id }: { id: string }) {
   const router = useRouter();
   const { showToast } = useToast();
-  const { task, connected, notFound } = useTask(id);
-  const { tasks: allTasks } = useTaskList();
+  const { task, connected, notFound, patchTask } = useTask(id);
+  const { tasks: allTasks, refresh: refreshTasks } = useTaskList();
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
@@ -424,7 +425,16 @@ export function TaskDetail({ id }: { id: string }) {
               <span className="text-xs text-warning">실시간 연결 끊김, 재연결 중</span>
             ) : null}
           </div>
-          <h1 className="break-words text-2xl font-semibold leading-snug text-fg">{task.title}</h1>
+          <TaskTitle
+            taskId={task.id}
+            title={task.title}
+            onRenamed={(title) => {
+              patchTask({ title });
+              // The shared list is what the dashboard renders — refresh it so
+              // the row's title matches this heading without waiting a poll.
+              void refreshTasks();
+            }}
+          />
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {isQueued ? (
@@ -734,6 +744,15 @@ export function TaskDetail({ id }: { id: string }) {
         </div>
 
         <aside className="min-w-0 space-y-6 lg:sticky lg:top-[4.5rem] lg:self-start">
+          {/*
+            Who is on this Task and what they're doing *right now* — the same
+            characters as the dashboard strip, but cast down to the Agents this
+            Task's Workflow actually uses, so a Task Codex never touches doesn't
+            show Codex idling. This replaces the old static "담당" avatar row in
+            작업 정보 below: it names the same Agents and adds live state.
+          */}
+          <AgentStrip tasks={[task]} agents={agents} label="담당" />
+
           <section className="space-y-3">
             <SectionLabel>진행 단계</SectionLabel>
             <WorkflowTimeline workflow={task.workflow} relations={timelineRelations} />
@@ -742,16 +761,6 @@ export function TaskDetail({ id }: { id: string }) {
           <section className="space-y-3 border-t border-border pt-5">
             <SectionLabel>작업 정보</SectionLabel>
             <dl className="space-y-3">
-              <Meta label="담당">
-                <span className="flex flex-wrap items-center gap-1.5">
-                  {agents.map((a) => (
-                    <span key={a} className="flex items-center gap-1.5">
-                      <AgentAvatar agent={a} size="sm" />
-                      {AGENT_LABEL[a]}
-                    </span>
-                  ))}
-                </span>
-              </Meta>
               <Meta label="프로젝트">
                 <span className="mono block break-all text-xs">{task.projectPath}</span>
               </Meta>

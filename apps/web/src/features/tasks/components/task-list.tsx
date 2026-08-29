@@ -1,18 +1,21 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Plus } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { useTaskList } from "../hooks/use-task-list";
 import { tasksApi } from "../api/tasks-api";
-import { StatusFilter, type MainFilter } from "./status-filter";
-import { TaskSearchBar } from "./task-search-bar";
-import { ActiveTaskRow, TaskListHeader, TaskRow } from "./task-row";
+import type { MainFilter } from "./status-filter";
+import { TaskFilterBar, defaultFilters, type TaskFilters } from "./task-filter-bar";
+import { TaskListHeader, TaskRow } from "./task-row";
+import { ActiveTaskCard } from "./active-task-card";
 import { NewTaskModal } from "./new-task-modal";
 import { Button } from "@/components/button";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { useToast } from "@/components/toast";
 import { projectName } from "@/lib/format";
+import { describeRange, isWithinRange } from "../date-range";
 import { statusGroupOf } from "../types";
 import {
   ATTENTION_REASON_LABEL,
@@ -51,12 +54,27 @@ function attentionBreakdownText(items: TaskListItem[]): string | null {
 }
 
 export function TaskList() {
-  const { tasks, loading, error, refresh } = useTaskList();
+  const { tasks: allTasks, loading, error, refresh } = useTaskList();
   const { showToast } = useToast();
-  const [filter, setFilter] = useState<MainFilter>("all");
-  const [search, setSearch] = useState("");
-  const [project, setProject] = useState("");
+  const [filters, setFilters] = useState<TaskFilters>(defaultFilters);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
+
+  // The control tower's 확인 필요 alarm links here with `?filter=attention`, so
+  // the alarm is something you can act on rather than only read.
+  const searchParams = useSearchParams();
+  const filterParam = searchParams.get("filter");
+  useEffect(() => {
+    if (filterParam === "attention" || filterParam === "active" || filterParam === "done") {
+      setFilters((prev) => ({ ...prev, status: filterParam as MainFilter }));
+    }
+  }, [filterParam]);
+
+  // The date range narrows the pool before anything else, so the status counts
+  // and the rows always describe the same period.
+  const tasks = useMemo(
+    () => allTasks.filter((t) => isWithinRange(t, filters.range)),
+    [allTasks, filters.range],
+  );
 
   const [cancelTarget, setCancelTarget] = useState<TaskListItem | null>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
@@ -72,10 +90,10 @@ export function TaskList() {
   );
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = filters.search.trim().toLowerCase();
     return tasks.filter((t) => {
-      if (filter !== "all" && statusGroupOf(t.status) !== filter) return false;
-      if (project && projectName(t.projectPath) !== project) return false;
+      if (filters.status !== "all" && statusGroupOf(t.status) !== filters.status) return false;
+      if (filters.project && projectName(t.projectPath) !== filters.project) return false;
       if (!q) return true;
       return (
         t.jobId.toLowerCase().includes(q) ||
@@ -84,7 +102,7 @@ export function TaskList() {
         (t.branch ?? "").toLowerCase().includes(q)
       );
     });
-  }, [tasks, filter, project, search]);
+  }, [tasks, filters.status, filters.project, filters.search]);
 
   const counts: Record<MainFilter, number> = useMemo(() => {
     const c: Record<MainFilter, number> = { active: 0, attention: 0, done: 0, all: tasks.length };
@@ -159,21 +177,23 @@ export function TaskList() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h1 className="text-xl font-semibold text-fg">작업</h1>
-        {tasks.length > 0 ? (
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <StatusFilter value={filter} onChange={setFilter} counts={counts} />
-            <TaskSearchBar
-              search={search}
-              onSearchChange={setSearch}
-              project={project}
-              onProjectChange={setProject}
-              projectOptions={projectOptions}
-            />
-          </div>
-        ) : null}
       </div>
+
+      {/*
+        Kept mounted whenever the workspace holds any Task at all (not just any
+        Task in range), so narrowing to a quiet period doesn't make the controls
+        vanish along with the rows — leaving no way back.
+      */}
+      {allTasks.length > 0 ? (
+        <TaskFilterBar
+          filters={filters}
+          onChange={setFilters}
+          counts={counts}
+          projectOptions={projectOptions}
+        />
+      ) : null}
 
       {/*
         One bordered surface for the whole list — header row, group
@@ -191,15 +211,25 @@ export function TaskList() {
             className="m-4"
           />
         ) : tasks.length === 0 ? (
-          <EmptyState
-            title="아직 등록된 작업이 없습니다"
-            description="프로젝트와 지시 내용을 입력하면 Claude 또는 Codex가 실행합니다."
-            action={
-              <Button icon={<Plus className="h-4 w-4" />} onClick={() => setNewTaskOpen(true)}>
-                새 작업
-              </Button>
-            }
-          />
+          allTasks.length > 0 ? (
+            // Tasks exist, just not in this period — say so, rather than
+            // claiming the workspace is empty and offering to create its first
+            // Task when there are already forty.
+            <EmptyState
+              title={`${describeRange(filters.range)}에 작업이 없습니다`}
+              description="기간을 넓히면 그 이전에 생성된 작업을 볼 수 있습니다."
+            />
+          ) : (
+            <EmptyState
+              title="아직 등록된 작업이 없습니다"
+              description="프로젝트와 지시 내용을 입력하면 Claude 또는 Codex가 실행합니다."
+              action={
+                <Button icon={<Plus className="h-4 w-4" />} onClick={() => setNewTaskOpen(true)}>
+                  새 작업
+                </Button>
+              }
+            />
+          )
         ) : filtered.length === 0 ? (
           <EmptyState
             title="조건에 맞는 작업이 없습니다"
@@ -224,7 +254,7 @@ export function TaskList() {
                   ) : null}
                   {section.items.map((t) =>
                     section.key === "active" ? (
-                      <ActiveTaskRow
+                      <ActiveTaskCard
                         key={t.id}
                         task={t}
                         onCancelClick={setCancelTarget}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { tasksApi } from "../api/tasks-api";
 import type { Task, TaskEvent } from "../types";
 
@@ -82,5 +82,16 @@ export function useTask(id: string) {
     };
   }, [id]);
 
-  return { task, connected, notFound, error, setError };
+  /**
+   * Applies a change the client already knows the server accepted (currently
+   * only a rename), so the heading updates on commit instead of waiting for
+   * the next SSE frame. Narrow by design: everything else about a Task comes
+   * from the stream, and letting screens write arbitrary fields here is how
+   * a local copy starts disagreeing with the server.
+   */
+  const patchTask = useCallback((patch: Pick<Partial<Task>, "title">) => {
+    setTask((prev) => (prev ? { ...prev, ...patch } : prev));
+  }, []);
+
+  return { task, connected, notFound, error, setError, patchTask };
 }

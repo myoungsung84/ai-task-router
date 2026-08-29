@@ -46,6 +46,9 @@ export const tasksApi = {
   get: (id: string) => request<Task>(`/api/tasks/${id}`),
   create: (input: CreateTaskInput) =>
     request<Task>("/api/tasks", { method: "POST", body: JSON.stringify(input) }),
+  /** Renames a Task. Sending an empty string regenerates the title from the instruction server-side rather than storing a blank. */
+  rename: (id: string, title: string) =>
+    request<Task>(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
   start: (id: string) => request<Task>(`/api/tasks/${id}/start`, { method: "POST" }),
   cancel: (id: string) => request<Task>(`/api/tasks/${id}/cancel`, { method: "POST" }),
   /** "검토 후 완료 처리" — WARNING-only; rejected server-side if the review process itself failed/didn't parse or an implement/analyze Step failed. */

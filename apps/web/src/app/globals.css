@@ -289,10 +289,96 @@ body {
   animation: fade-in-up var(--duration-base) ease-out;
 }
 
+/*
+ * Agent character motion. These four are the whole vocabulary for "an AI is
+ * working": one per AgentActivity, each small enough to sit in a 44px badge
+ * without repainting anything around it. They animate `transform`/`opacity`
+ * only — never a layout property — so a strip of characters looping forever
+ * at the top of a page stays free.
+ *
+ * The characters are the one place in this app that is allowed to feel alive;
+ * everything below them (rows, logs, diffs) stays still on purpose.
+ */
+
+/* writing — the small settle of someone leaning into a keyboard. */
+@keyframes agent-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+.agent-bob {
+  animation: agent-bob 1.8s ease-in-out infinite;
+}
+
+/* researching / reviewing — a ring sweeping around the mark. Two speeds so
+   "looking things up" reads as busier than "checking over". */
+@keyframes agent-orbit {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+.agent-orbit {
+  animation: agent-orbit 3s linear infinite;
+}
+.agent-orbit-slow {
+  animation: agent-orbit 6s linear infinite;
+}
+
+/* error — a single flinch on mount, not a loop: a character that keeps
+   twitching turns a real failure into wallpaper you stop seeing. */
+@keyframes agent-flinch {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-2px);
+  }
+  40% {
+    transform: translateX(2px);
+  }
+  60% {
+    transform: translateX(-1px);
+  }
+  80% {
+    transform: translateX(1px);
+  }
+}
+.agent-flinch {
+  animation: agent-flinch 0.45s ease-in-out 1;
+}
+
+/* idle — breathing, barely. Present so a resting character still reads as
+   "here and available" rather than as a disabled control. */
+@keyframes agent-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.75;
+  }
+}
+.agent-breathe {
+  animation: agent-breathe 4s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .typing-dot,
   .scan-sweep,
-  .animate-fade-in-up {
+  .animate-fade-in-up,
+  .agent-bob,
+  .agent-orbit,
+  .agent-orbit-slow,
+  .agent-flinch,
+  .agent-breathe {
     animation: none !important;
   }
 }

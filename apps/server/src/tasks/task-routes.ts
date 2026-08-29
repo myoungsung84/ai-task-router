@@ -49,6 +49,22 @@ taskRouter.get("/:id", (req, res) => {
   res.json(task);
 });
 
+// Rename. Deliberately the only field this accepts: a Task's project,
+// instruction and workflow define what actually ran, and letting a PATCH edit
+// those would make the stored record disagree with the run it describes.
+taskRouter.patch("/:id", (req, res) => {
+  const title: unknown = (req.body ?? {}).title;
+  if (typeof title !== "string") {
+    res.status(400).json({ error: "title은 문자열이어야 합니다." });
+    return;
+  }
+  if (title.length > 200) {
+    res.status(400).json({ error: "title이 너무 깁니다 (최대 200자)." });
+    return;
+  }
+  res.json(taskService.renameTask(requireIdParam(req), title));
+});
+
 taskRouter.get(
   "/:id/diff",
   asyncHandler(async (req, res) => {

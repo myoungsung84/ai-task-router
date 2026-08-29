@@ -3,6 +3,7 @@ import "./globals.css";
 import { pretendard } from "@/lib/fonts";
 import { AppHeader } from "@/components/app-header";
 import { ToastProvider } from "@/components/toast";
+import { TaskListProvider } from "@/features/tasks/hooks/use-task-list";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 export const metadata: Metadata = {
@@ -32,12 +33,20 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       */}
       <body className="bg-bg text-fg">
         <ToastProvider>
-          <div className="flex min-h-screen flex-col">
-            <AppHeader />
-            <main className="mx-auto w-full max-w-content flex-1 px-4 py-8 sm:px-6">
-              {children}
-            </main>
-          </div>
+          {/*
+            One Task poll for the entire app (see use-task-list.tsx). It sits
+            above the header because the header's own "새 작업" flow and every
+            page below it read the same list — a screen mounting its own
+            poller is what this provider exists to prevent.
+          */}
+          <TaskListProvider>
+            <div className="flex min-h-screen flex-col">
+              <AppHeader />
+              <main className="mx-auto w-full max-w-content flex-1 px-4 py-8 sm:px-6">
+                {children}
+              </main>
+            </div>
+          </TaskListProvider>
         </ToastProvider>
       </body>
     </html>

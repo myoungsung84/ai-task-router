@@ -2,12 +2,13 @@
 
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { Play, Square, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { cn, formatDuration, projectName } from "@/lib/format";
 import { IconButton } from "@/components/button";
 import { AgentAvatar } from "@/components/agent-icon";
 import { Badge, type Tone } from "@/components/badge";
 import { TaskStatusBadge } from "./task-status-badge";
+import { JobIdTag } from "./job-id-tag";
 import {
   AGENT_LABEL,
   ATTENTION_REASON_LABEL,
@@ -15,8 +16,6 @@ import {
   taskActivityPhrase,
   type AttentionReason,
 } from "../workflow-labels";
-import { useTask } from "../hooks/use-task";
-import { useNowTick } from "../hooks/use-now-tick";
 import { compareReviewIssueSeverity } from "../types";
 import type { TaskListItem } from "../types";
 
@@ -151,6 +150,10 @@ function RowShell({
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
+          {/* The Job ID leads the row rather than sitting in the metadata line
+              below, where it shared weight and colour with the outcome text and
+              could not be scanned down a column. */}
+          <JobIdTag jobId={task.jobId} />
           {/*
             One real link, stretched over the row by its own `::after`
             overlay — that is what makes status / title / AI / project / time
@@ -170,7 +173,6 @@ function RowShell({
           </span>
         </div>
         <p className="mt-0.5 flex min-w-0 items-baseline gap-1.5 text-xs">
-          <span className="mono shrink-0 text-fg-faint">{task.jobId}</span>
           {attentionReason ? (
             <Badge tone={ATTENTION_REASON_TONE[attentionReason]} className="shrink-0">
               {ATTENTION_REASON_LABEL[attentionReason]}
@@ -237,78 +239,6 @@ export function TaskRow({
         >
           <Trash2 className="h-4 w-4" aria-hidden />
         </IconButton>
-      }
-    />
-  );
-}
-
-/**
- * A queued/running/reviewing Task's row — the same row, plus a brand flag
- * on the left edge and one line of live log tail, so "work is happening"
- * is visible without breaking the list into a second layout. Opens its own
- * small SSE subscription (via `useTask`) purely for that log tail and
- * fine-grained step updates; the dashboard's list poll already keeps
- * membership and overall status current, so this adds one stream per
- * *currently active* Task, not per row.
- */
-export function ActiveTaskRow({
-  task: listTask,
-  onCancelClick,
-  onStartClick,
-  starting = false,
-}: {
-  task: TaskListItem;
-  onCancelClick: (task: TaskListItem) => void;
-  onStartClick?: (task: TaskListItem) => void;
-  starting?: boolean;
-}) {
-  const { task: live } = useTask(listTask.id);
-  const task = live ?? listTask;
-  const isQueued = task.status === "QUEUED";
-  const cancellable = task.status === "RUNNING" || task.status === "REVIEWING" || isQueued;
-  const recentLog = live
-    ? [...live.logs].reverse().find((l) => l.source !== "system" && l.text.trim())
-    : undefined;
-
-  // Forces a re-render every second while genuinely active, so the elapsed
-  // readout keeps moving — a real timestamp diff (formatDuration falls back
-  // to Date.now()), not a simulated progress bar.
-  useNowTick(task.status === "RUNNING" || task.status === "REVIEWING");
-
-  return (
-    <RowShell
-      task={task}
-      accent
-      extra={
-        recentLog ? (
-          <p className="mono mt-1.5 truncate text-xs text-fg-faint">
-            <span aria-hidden>&gt; </span>
-            {recentLog.text}
-          </p>
-        ) : null
-      }
-      actions={
-        <div className="flex items-center">
-          {isQueued && onStartClick ? (
-            <IconButton
-              label="지금 실행"
-              size="sm"
-              onClick={() => onStartClick(listTask)}
-              disabled={starting}
-            >
-              <Play className="h-4 w-4" aria-hidden />
-            </IconButton>
-          ) : null}
-          {cancellable ? (
-            <IconButton
-              label={isQueued ? "대기 취소" : "실행 중단"}
-              size="sm"
-              onClick={() => onCancelClick(listTask)}
-            >
-              <Square className="h-4 w-4" aria-hidden />
-            </IconButton>
-          ) : null}
-        </div>
       }
     />
   );

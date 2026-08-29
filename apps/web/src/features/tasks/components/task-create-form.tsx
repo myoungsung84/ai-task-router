@@ -5,7 +5,7 @@ import { ClipboardPaste } from "lucide-react";
 import { tasksApi } from "../api/tasks-api";
 import { useSettings } from "@/features/settings/hooks/use-settings";
 import { Button } from "@/components/button";
-import { Checkbox, FieldLabel, Textarea } from "@/components/field";
+import { Checkbox, Field, FieldLabel, Input, Textarea } from "@/components/field";
 import { Alert } from "@/components/alert";
 import { LoadingState } from "@/components/states";
 import { cn } from "@/lib/format";
@@ -14,7 +14,7 @@ import { PurposePicker } from "./purpose-picker";
 import { BranchField, type BranchMode } from "./branch-field";
 import { RoleOverridePanel, type RoleOverrideMap } from "./role-override-panel";
 import { findPathLikeToken } from "../lib/paste-path-detect";
-import { DEFAULT_ROLE_SETTINGS } from "../types";
+import { DEFAULT_ROLE_SETTINGS, generateTitleFromInstruction } from "../types";
 import type { TaskPurpose } from "../types";
 import type { ProjectValidation } from "../api/projects-api";
 import type { FollowUpPrefill } from "../lib/follow-up";
@@ -25,12 +25,16 @@ import type { FollowUpPrefill } from "../lib/follow-up";
  *
  * One vertical flow, every region starting on the same left edge and
  * spanning the same width, in the order the decisions are actually made:
- * where the work happens (프로젝트 · 브랜치) → what to do (작업 지시) → what
- * kind of work it is (작업 유형) → who does it, only if the defaults aren't
- * right (담당 AI 변경) → how to run it (footer). No title field (the server
- * always generates one) and no hand-assembled workflow editor (purpose plus
- * the configured roles decide the workflow; see
- * `resolveWorkflowSpecForPurpose`).
+ * where the work happens (프로젝트 · 브랜치) → what to do (작업 지시) → what it
+ * should be called (제목) → what kind of work it is (작업 유형) → who does it,
+ * only if the defaults aren't right (담당 AI 변경) → how to run it (footer).
+ * No hand-assembled workflow editor (purpose plus the configured roles decide
+ * the workflow; see `resolveWorkflowSpecForPurpose`).
+ *
+ * 제목 sits *after* 작업 지시 because it is derived from it: the field tracks
+ * `generateTitleFromInstruction` as the instruction is typed and stops the
+ * moment the user edits it, so the common case costs no interaction while a
+ * bad auto-title is always correctable before the Task exists.
  *
  * `surface` only controls how the action bar attaches: inside a dialog it
  * sticks to the bottom of the scroll area and bleeds to the dialog's edges;
@@ -49,6 +53,11 @@ export function TaskCreateForm({
   const { settings, loading: settingsLoading } = useSettings();
   const [projectPath, setProjectPath] = useState(prefill?.projectPath ?? "");
   const [instruction, setInstruction] = useState(prefill?.instruction ?? "");
+  const [title, setTitle] = useState("");
+  // Once the user types in 제목 the field stops following the instruction — an
+  // auto-title that silently overwrites what someone deliberately wrote is
+  // worse than no auto-title at all.
+  const [titleTouched, setTitleTouched] = useState(false);
   const [purpose, setPurpose] = useState<TaskPurpose>(prefill?.purpose ?? "implement");
   const [roleOverrides, setRoleOverrides] = useState<RoleOverrideMap>(prefill?.roleOverrides ?? {});
   const [branchMode, setBranchMode] = useState<BranchMode>(prefill?.branch ? "new" : "current");
@@ -67,6 +76,9 @@ export function TaskCreateForm({
 
   const roles = settings?.roles ?? DEFAULT_ROLE_SETTINGS;
   const showBranch = purpose === "implement";
+
+  const suggestedTitle = generateTitleFromInstruction(instruction);
+  const effectiveTitle = titleTouched ? title : instruction.trim() ? suggestedTitle : "";
 
   // Scans the instruction for a path-like token and offers it as a
   // dismissible suggestion — never auto-fills the project path field.
@@ -125,6 +137,9 @@ export function TaskCreateForm({
       const task = await tasksApi.create({
         projectPath: projectPath.trim(),
         instruction: instruction.trim(),
+        // Empty means "server, generate one" — the same generator this form
+        // previewed, so an untouched field and no field at all agree.
+        title: effectiveTitle.trim() || undefined,
         purpose,
         roleOverrides: Object.keys(roleOverrides).length > 0 ? roleOverrides : null,
         branch: branchMode === "new" ? branch.trim() || null : null,
@@ -256,6 +271,31 @@ export function TaskCreateForm({
           </div>
         ) : null}
       </div>
+
+      {/*
+        Placed under 작업 지시 and pre-filled from it. Left alone it costs the
+        user nothing; the moment they type, it detaches and keeps what they
+        wrote. Clearing it hands the decision back to the server's identical
+        generator rather than saving an empty title.
+      */}
+      <Field
+        label="제목"
+        hint={
+          titleTouched
+            ? "비우면 작업 지시에서 자동으로 생성됩니다."
+            : "작업 지시에서 자동 생성된 제목입니다. 수정할 수 있습니다."
+        }
+      >
+        <Input
+          value={effectiveTitle}
+          onChange={(e) => {
+            setTitleTouched(true);
+            setTitle(e.target.value);
+          }}
+          placeholder="작업 지시를 입력하면 자동으로 채워집니다"
+          maxLength={60}
+        />
+      </Field>
 
       <div>
         <FieldLabel className="mb-2">작업 유형</FieldLabel>
