@@ -1,7 +1,8 @@
 import { cn } from "@/lib/format";
 import { AGENT_LABEL } from "@/features/tasks/workflow-labels";
 import type { AgentName } from "@/features/tasks/types";
-import { COMPOSE_STAGES, COMPOSE_STAGE_LABEL, type ComposeStage } from "../types";
+import { COMPOSE_STAGES } from "@ai-task-router/shared";
+import { COMPOSE_STAGE_LABEL } from "../types";
 
 /**
  * One AI's turn, drawn with the same milestone grammar as a Task's StepTrack:
@@ -15,14 +16,16 @@ import { COMPOSE_STAGES, COMPOSE_STAGE_LABEL, type ComposeStage } from "../types
  * third rail turns up, that is the moment to merge them; the visual rules are
  * deliberately identical so the merge stays cheap.
  *
- * The 시작 node is here for the same reason it is there: without it the first
- * stage would be full the instant the turn began.
+ * **Only the first stage is observed.** The Router knows the agent asked for
+ * the document, because it handed it over; it does not know how far through
+ * its own reasoning that agent is, and no honest signal exists for the rest.
+ * So `claimed` lights 문서 읽음 and everything after it stays pending. The
+ * later nodes are there to say what a turn consists of, not to claim progress
+ * through it — the same restraint that keeps this from being a progress bar.
  *
- * What this rail buys beyond decoration is that its first node is literally
- * 문서 읽음. The proposal's §2 promises that an AI answers from the source
- * document rather than from the chat above it, and that promise is otherwise
- * invisible — a claim in a spec that the screen never has to keep. Drawn, the
- * user watches it happen.
+ * That first node is the one worth showing anyway: an AI is supposed to answer
+ * from the record rather than from the chat above it, and that promise is
+ * otherwise invisible. Drawn, the user watches it happen.
  */
 
 const AGENT_DOT: Record<AgentName, string> = {
@@ -37,30 +40,24 @@ const AGENT_TEXT: Record<AgentName, string> = {
 
 type NodeState = "done" | "running" | "pending";
 
-function stateOf(stage: ComposeStage, current: ComposeStage): NodeState {
-  const at = COMPOSE_STAGES.indexOf(current);
-  const i = COMPOSE_STAGES.indexOf(stage);
-  if (i < at) return "done";
-  if (i === at) return "running";
-  return "pending";
-}
-
 export function ComposeTrack({
   agent,
-  stage,
+  claimed,
   className,
 }: {
   agent: AgentName;
-  stage: ComposeStage;
+  /** The agent has fetched the document for this round. */
+  claimed: boolean;
   className?: string;
 }) {
-  // The synthetic 시작 node, then the five fixed stages.
+  // The synthetic 시작 node, then the five stages. Without 시작, a turn that
+  // had only just begun would show its first segment already full.
   const nodes: { key: string; label: string; state: NodeState }[] = [
     { key: "__start", label: "시작", state: "done" },
-    ...COMPOSE_STAGES.map((s) => ({
+    ...COMPOSE_STAGES.map((s, i) => ({
       key: s,
       label: COMPOSE_STAGE_LABEL[s],
-      state: stateOf(s, stage),
+      state: (claimed && i === 0 ? "running" : "pending") as NodeState,
     })),
   ];
 
@@ -73,7 +70,7 @@ export function ComposeTrack({
     >
       <p className="mb-2 flex items-center gap-1.5 text-xs">
         <span className={cn("font-medium", AGENT_TEXT[agent])}>{AGENT_LABEL[agent]}</span>
-        <span className="text-fg-muted">작성 중</span>
+        <span className="text-fg-muted">{claimed ? "문서 읽는 중" : "차례 대기"}</span>
       </p>
 
       <div className="relative flex h-3 items-center">

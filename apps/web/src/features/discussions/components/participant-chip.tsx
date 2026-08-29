@@ -3,7 +3,7 @@ import { AgentMark } from "@/features/agents/components/agent-character";
 import { AGENT_LABEL } from "@/features/tasks/workflow-labels";
 import type { AgentActivity } from "@/features/agents/agent-activity";
 import { cn } from "@/lib/format";
-import type { Participant, ParticipantState } from "../types";
+import type { Participant, ParticipantState } from "@ai-task-router/shared";
 
 /**
  * A participant in the room's header — the character, plus 입장 유지 when it

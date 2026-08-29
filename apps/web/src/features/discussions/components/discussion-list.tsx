@@ -1,11 +1,14 @@
+"use client";
+
 import Link from "next/link";
+import type { DiscussionListItem, DiscussionStatus } from "@ai-task-router/shared";
 import { Badge, type Tone } from "@/components/badge";
-import { EmptyState } from "@/components/states";
+import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { cn } from "@/lib/format";
 import { ParticipantChip } from "./participant-chip";
 import { RepoScope } from "./repo-scope";
-import { MOCK_DISCUSSIONS } from "../mock";
-import { DISCUSSION_STATUS_LABEL, type Discussion, type DiscussionStatus } from "../types";
+import { useDiscussions } from "../hooks/use-discussions";
+import { DISCUSSION_STATUS_LABEL } from "../types";
 
 /**
  * The discussion index, built on the same list grammar as the Task list: one
@@ -39,8 +42,8 @@ function sinceLabel(iso: string): string {
   return `${Math.floor(hours / 24)}일 전`;
 }
 
-function DiscussionRow({ discussion }: { discussion: Discussion }) {
-  const { summary, participants, composing } = discussion;
+function DiscussionRow({ discussion }: { discussion: DiscussionListItem }) {
+  const { summary, participants } = discussion;
 
   return (
     <div className="group relative flex items-center gap-4 px-4 py-4 transition-colors duration-fast hover:bg-fg/[0.03]">
@@ -56,18 +59,16 @@ function DiscussionRow({ discussion }: { discussion: Discussion }) {
 
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="mono shrink-0 text-xs text-fg-faint">{discussion.id}</span>
+          <span className="mono shrink-0 text-xs text-fg-faint">{discussion.roomId}</span>
           <Link
-            href={`/discussions/${discussion.id}`}
+            href={`/discussions/${discussion.roomId}`}
             className="min-w-0 truncate text-sm font-medium text-fg after:absolute after:inset-0 after:content-[''] group-hover:underline"
           >
             {discussion.title}
           </Link>
         </div>
         <p className="mt-1 flex min-w-0 items-baseline gap-1.5 truncate text-xs text-fg-muted">
-          {composing ? (
-            <span className="text-fg-secondary">작성 중</span>
-          ) : summary.open.length > 0 ? (
+          {summary.open.length > 0 ? (
             <span>미결정 쟁점 {summary.open.length}</span>
           ) : (
             <span>쟁점 없음</span>
@@ -98,28 +99,30 @@ function DiscussionRow({ discussion }: { discussion: Discussion }) {
 }
 
 export function DiscussionList() {
-  const discussions = MOCK_DISCUSSIONS;
+  const { discussions, loading, error, refresh } = useDiscussions();
 
   return (
-    <div className="space-y-4">
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
-        {discussions.length === 0 ? (
-          <EmptyState
-            title="아직 논의가 없습니다"
-            description="안건과 배경을 정리하면 Claude와 Codex가 원본 문서를 읽고 의견을 남깁니다."
-          />
-        ) : (
-          <div className="divide-y divide-border">
-            {discussions.map((d) => (
-              <DiscussionRow key={d.id} discussion={d} />
-            ))}
-          </div>
-        )}
-      </div>
-      <p className="text-xs text-fg-faint">
-        화면 확인용 목 데이터입니다. 논의 생성과 저장은 아직 구현되지 않았습니다 — 설계는{" "}
-        <span className="mono">docs/discussion-room-ux.md</span>에 있습니다.
-      </p>
+    <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      {loading && discussions.length === 0 ? (
+        <LoadingState label="논의를 불러오는 중" padding="md" className="justify-center" />
+      ) : error ? (
+        <ErrorState
+          message={`목록을 불러오지 못했습니다: ${error}`}
+          onRetry={refresh}
+          className="m-4"
+        />
+      ) : discussions.length === 0 ? (
+        <EmptyState
+          title="아직 등록된 논의가 없습니다"
+          description="Claude나 Codex와 대화하다 논의방을 만들면 여기에 나타납니다. 안건과 관련 저장소를 정리해 create_discussion 도구로 시작합니다."
+        />
+      ) : (
+        <div className="divide-y divide-border">
+          {discussions.map((d) => (
+            <DiscussionRow key={d.roomId} discussion={d} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/format";
-import type { DiscussionSummary } from "../types";
+import type { DiscussionSummary } from "@ai-task-router/shared";
+import { discussionsApi } from "../api/discussions-api";
 
 /**
  * The source document, resident but collapsed.
@@ -46,15 +47,18 @@ function Section({ title, items }: { title: string; items: string[] }) {
 }
 
 export function DocumentRail({
+  discussionId,
   summary,
   version,
   className,
 }: {
+  discussionId: string;
   summary: DiscussionSummary;
   version: number;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [log, setLog] = useState<string | null>(null);
   const Chevron = open ? ChevronDown : ChevronRight;
 
   return (
@@ -86,10 +90,24 @@ export function DocumentRail({
           */}
           <button
             type="button"
+            onClick={async () => {
+              if (log !== null) {
+                setLog(null);
+                return;
+              }
+              setLog(
+                await discussionsApi.document(discussionId).catch(() => "불러오지 못했습니다."),
+              );
+            }}
             className="text-xs text-fg-faint underline-offset-2 transition-colors duration-fast hover:text-fg-muted hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
           >
-            전체 기록 보기
+            {log === null ? "전체 기록 보기" : "전체 기록 접기"}
           </button>
+          {log !== null ? (
+            <pre className="mono max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-md bg-surface-sunken p-2 text-[11px] leading-relaxed text-fg-muted">
+              {log}
+            </pre>
+          ) : null}
         </div>
       ) : null}
     </aside>

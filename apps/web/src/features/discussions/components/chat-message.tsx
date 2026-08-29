@@ -2,7 +2,7 @@ import { FileText, CornerDownRight } from "lucide-react";
 import { AgentMark } from "@/features/agents/components/agent-character";
 import { AGENT_LABEL } from "@/features/tasks/workflow-labels";
 import { cn, formatTime } from "@/lib/format";
-import type { DiscussionMessage } from "../types";
+import type { DiscussionMessage } from "@ai-task-router/shared";
 
 /**
  * One posted message.

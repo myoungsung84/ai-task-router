@@ -1,18 +1,12 @@
-import { notFound } from "next/navigation";
+"use client";
+
 import { DiscussionRoom } from "@/features/discussions/components/discussion-room";
-import { findDiscussion, MOCK_DISCUSSIONS } from "@/features/discussions/mock";
 
 /**
- * One discussion room. Reads from the mock store for now — see
- * docs/discussion-room-ux.md §6 for the append-only document this will read
- * once the store exists.
+ * One discussion room. Client-rendered because the document is live — rounds
+ * open and close while the page is open, and the participants writing into it
+ * are agents in their own sessions rather than anything this page controls.
  */
-export function generateStaticParams() {
-  return MOCK_DISCUSSIONS.map((d) => ({ id: d.id }));
-}
-
 export default function DiscussionRoomPage({ params }: { params: { id: string } }) {
-  const discussion = findDiscussion(params.id);
-  if (!discussion) notFound();
-  return <DiscussionRoom discussion={discussion} />;
+  return <DiscussionRoom id={params.id} />;
 }
