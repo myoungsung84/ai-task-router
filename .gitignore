@@ -15,6 +15,9 @@ apps/server/data/
 .env.local
 .env.*.local
 
+# Claude Code local settings (per-machine approvals, not shared)
+.claude/settings.local.json
+
 # editor / os
 .vscode/
 .idea/
