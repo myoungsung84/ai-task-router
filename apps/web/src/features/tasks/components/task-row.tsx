@@ -9,7 +9,6 @@ import { AgentAvatar } from "@/components/agent-icon";
 import { Badge, type Tone } from "@/components/badge";
 import { TaskStatusBadge } from "./task-status-badge";
 import { JobIdTag } from "./job-id-tag";
-import { StepTrack } from "./step-track";
 import {
   AGENT_LABEL,
   ATTENTION_REASON_LABEL,
@@ -44,10 +43,28 @@ const COL = {
 };
 
 const ROW_BASE =
-  "group relative cursor-pointer px-4 transition-colors duration-fast hover:bg-fg/[0.03]";
+  "group relative flex cursor-pointer items-center gap-4 px-4 transition-colors duration-fast hover:bg-fg/[0.03]";
 
-/** The columns line, held apart from the outer row so the milestone rail can sit under it at full width. */
-const ROW_COLUMNS = "flex items-center gap-4";
+/**
+ * A 3px status flag down the row's left edge, the same device the running card
+ * uses for its brand-coloured bar — so "what state is this in" is answerable by
+ * colour down a column, before any badge is read.
+ *
+ * This replaced a full milestone rail under every finished row. The rail was
+ * real information (which Agents ran, where it stopped), but twenty grey rails
+ * stacked down the list cost more rhythm than they returned: for a Task that is
+ * over, the one thing worth scanning is its outcome, and the detail page is one
+ * click away for the rest.
+ */
+const STATUS_RAIL: Record<TaskListItem["status"], string> = {
+  QUEUED: "bg-neutral/50",
+  RUNNING: "bg-brand",
+  REVIEWING: "bg-reviewing",
+  READY: "bg-success",
+  WARNING: "bg-warning",
+  FAILED: "bg-danger",
+  CANCELLED: "bg-neutral/40",
+};
 
 /** Reason chip tone — REVIEW_NEEDS_FIX reads softer (지적 사항, still fixable from the review itself) than the other, more urgent cases. */
 const ATTENTION_REASON_TONE: Record<AttentionReason, Tone> = {
@@ -132,13 +149,11 @@ function AgentStack({ agents }: { agents: TaskListItem["workflow"]["steps"][numb
 
 function RowShell({
   task,
-  accent = false,
   extra,
   actions,
   className,
 }: {
   task: TaskListItem;
-  accent?: boolean;
   extra?: ReactNode;
   actions: ReactNode;
   className?: string;
@@ -148,18 +163,20 @@ function RowShell({
   const agents = Array.from(new Set(task.workflow.steps.map((s) => s.agent)));
   return (
     <div className={cn(ROW_BASE, extra ? "py-3" : "py-2.5", className)}>
-      {accent ? <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] bg-brand" /> : null}
-      <div className={ROW_COLUMNS}>
-        <div className={COL.status}>
-          <TaskStatusBadge status={task.status} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            {/* The Job ID leads the row rather than sitting in the metadata line
+      <span
+        aria-hidden
+        className={cn("absolute inset-y-0 left-0 w-[3px]", STATUS_RAIL[task.status])}
+      />
+      <div className={COL.status}>
+        <TaskStatusBadge status={task.status} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          {/* The Job ID leads the row rather than sitting in the metadata line
               below, where it shared weight and colour with the outcome text and
               could not be scanned down a column. */}
-            <JobIdTag jobId={task.jobId} />
-            {/*
+          <JobIdTag jobId={task.jobId} />
+          {/*
             One real link, stretched over the row by its own `::after`
             overlay — that is what makes status / title / AI / project / time
             all clickable without nesting them inside an anchor (which would
@@ -167,43 +184,43 @@ function RowShell({
             row-level onClick (which would swallow the buttons' clicks). The
             action column sits above this overlay, see COL.actions usage.
           */}
-            <Link
-              href={`/tasks/${task.jobId}`}
-              className="min-w-0 truncate text-sm font-medium text-fg after:absolute after:inset-0 after:content-[''] group-hover:underline"
-            >
-              {task.title}
-            </Link>
-            <span className="sm:hidden">
-              <TaskStatusBadge status={task.status} />
-            </span>
-          </div>
-          <p className="mt-0.5 flex min-w-0 items-baseline gap-1.5 text-xs">
-            {attentionReason ? (
-              <Badge tone={ATTENTION_REASON_TONE[attentionReason]} className="shrink-0">
-                {ATTENTION_REASON_LABEL[attentionReason]}
-              </Badge>
-            ) : null}
-            <span
-              className={cn(
-                "min-w-0 truncate",
-                result.tone === "warning" ? "text-warning" : "text-fg-muted",
-              )}
-            >
-              {result.text}
-            </span>
-          </p>
-          {extra}
+          <Link
+            href={`/tasks/${task.jobId}`}
+            className="min-w-0 truncate text-sm font-medium text-fg after:absolute after:inset-0 after:content-[''] group-hover:underline"
+          >
+            {task.title}
+          </Link>
+          <span className="sm:hidden">
+            <TaskStatusBadge status={task.status} />
+          </span>
         </div>
-        <div className={COL.agents}>
-          <AgentStack agents={agents} />
-        </div>
-        <div className={cn(COL.project, "mono truncate text-xs text-fg-muted")}>
-          <span title={task.projectPath}>{projectName(task.projectPath)}</span>
-        </div>
-        <div className={cn(COL.time, "mono text-xs text-fg-faint")}>
-          {formatDuration(task.startedAt, task.completedAt)}
-        </div>
-        {/*
+        <p className="mt-0.5 flex min-w-0 items-baseline gap-1.5 text-xs">
+          {attentionReason ? (
+            <Badge tone={ATTENTION_REASON_TONE[attentionReason]} className="shrink-0">
+              {ATTENTION_REASON_LABEL[attentionReason]}
+            </Badge>
+          ) : null}
+          <span
+            className={cn(
+              "min-w-0 truncate",
+              result.tone === "warning" ? "text-warning" : "text-fg-muted",
+            )}
+          >
+            {result.text}
+          </span>
+        </p>
+        {extra}
+      </div>
+      <div className={COL.agents}>
+        <AgentStack agents={agents} />
+      </div>
+      <div className={cn(COL.project, "mono truncate text-xs text-fg-muted")}>
+        <span title={task.projectPath}>{projectName(task.projectPath)}</span>
+      </div>
+      <div className={cn(COL.time, "mono text-xs text-fg-faint")}>
+        {formatDuration(task.startedAt, task.completedAt)}
+      </div>
+      {/*
         `relative z-10` lifts the whole action column above the stretched
         link's overlay, so this strip — not just the buttons, but the padding
         around them — is a dead zone for navigation and a live one for the
@@ -211,23 +228,12 @@ function RowShell({
         listens for clicks today, and this keeps it that way if a row-level
         handler is ever added.
       */}
-        <div
-          className={cn(COL.actions, "relative z-10 flex justify-end")}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {actions}
-        </div>
+      <div
+        className={cn(COL.actions, "relative z-10 flex justify-end")}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {actions}
       </div>
-
-      {/*
-        The same milestone rail the running card shows, at row scale and
-        without labels. A finished Task's route is information — which Agents
-        ran, whether the review was skipped, where it stopped — and it used to
-        be readable only by opening the Task. Sitting along the row's bottom
-        edge, a failed run reads as a broken rail while scanning, before any
-        text is read.
-      */}
-      <StepTrack task={task} showLabels={false} size="sm" className="mt-2" />
     </div>
   );
 }

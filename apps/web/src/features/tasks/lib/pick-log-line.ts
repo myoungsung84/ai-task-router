@@ -63,6 +63,10 @@ const INTENTS: { pattern: RegExp; phrase: (m: RegExpMatchArray) => string }[] = 
     phrase: (m) => `탐색 중 · ${leaf(m[1]!)}`,
   },
   { pattern: /\b(?:Get-ChildItem|ls|dir|find)\b/i, phrase: () => "탐색 중" },
+  {
+    pattern: /\b(?:pnpm|npm|yarn)\b[^\n]*\brun\b\s+(build|test)\b/i,
+    phrase: (m) => (m[1]!.toLowerCase() === "build" ? "빌드 중" : "테스트 실행 중"),
+  },
   { pattern: /\b(?:tsc|typecheck)\b/i, phrase: () => "타입 검사 중" },
   { pattern: /\b(?:eslint|lint)\b/i, phrase: () => "린트 중" },
   { pattern: /\b(?:vitest|jest|pytest|test)\b/i, phrase: () => "테스트 실행 중" },

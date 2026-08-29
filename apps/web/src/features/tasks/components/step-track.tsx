@@ -166,27 +166,35 @@ function NodeLabel({ milestone }: { milestone: Milestone }) {
       ? formatDuration(step.startedAt, step.completedAt)
       : null;
 
+  const outcome =
+    state === "skipped"
+      ? "생략"
+      : state === "failed"
+        ? "실패"
+        : state === "cancelled"
+          ? "중단"
+          : (duration ?? "대기");
+
+  // One line rather than a stacked name/action/duration block: three stages of
+  // three-line captions made the card taller than the work it described.
   return (
-    <span className="flex min-w-0 flex-col leading-tight">
-      <span className="flex items-baseline gap-1">
-        <span
-          className={cn(
-            "truncate text-xs font-medium",
-            state === "running" ? AGENT_TEXT[step.agent] : "text-fg-muted",
-          )}
-        >
-          {AGENT_LABEL[step.agent]}
-        </span>
-        <span className="shrink-0 text-xs text-fg-faint">{ACTION_LABEL[step.action]}</span>
+    <span className="flex min-w-0 items-baseline gap-1 leading-tight">
+      <span
+        className={cn(
+          "truncate text-xs font-medium",
+          state === "running" ? AGENT_TEXT[step.agent] : "text-fg-muted",
+        )}
+      >
+        {AGENT_LABEL[step.agent]}
       </span>
-      <span className="mono text-xs text-fg-faint">
-        {state === "skipped"
-          ? "생략"
-          : state === "failed"
-            ? "실패"
-            : state === "cancelled"
-              ? "중단"
-              : (duration ?? "대기")}
+      <span className="shrink-0 text-xs text-fg-faint">{ACTION_LABEL[step.action]}</span>
+      <span
+        className={cn(
+          "mono shrink-0 text-xs",
+          state === "failed" ? "text-danger" : "text-fg-faint",
+        )}
+      >
+        {outcome}
       </span>
     </span>
   );
@@ -209,34 +217,49 @@ export function StepTrack({
 
   return (
     <div className={cn("min-w-0", className)}>
-      <div className="flex items-center">
-        {milestones.map((m, i) => (
-          <div
-            key={m.key}
-            className={cn("flex items-center", i === 0 ? "shrink-0" : "min-w-0 flex-1")}
-          >
-            {i > 0 ? (
-              <span
-                className={cn(
-                  "h-[3px] min-w-0 flex-1 overflow-hidden rounded-full",
-                  segmentClass(milestones[i - 1]!.state, m.state),
-                )}
-              >
-                {m.state === "running" ? (
-                  <span
-                    aria-hidden
-                    className="scan-sweep block h-full w-1/2 bg-gradient-to-r from-transparent via-white/50 to-transparent"
-                  />
-                ) : null}
-              </span>
-            ) : null}
-            <Node milestone={m} size={size} />
-          </div>
-        ))}
+      {/*
+        A groove is drawn first, across the full width, and the stage segments
+        sit inside it. Without it the unreached part of the route was nearly
+        invisible, so the nodes read as marks floating in space rather than as
+        positions along one path — and a Task with a long final stage looked
+        broken rather than unfinished.
+      */}
+      <div className="relative flex h-3 items-center">
+        <span aria-hidden className="absolute inset-x-0 h-[3px] rounded-full bg-fg/[0.09]" />
+
+        <div className="relative flex w-full items-center">
+          {milestones.map((m, i) => (
+            <div
+              key={m.key}
+              // Every gap is one equal share. Sizing them by state made the
+              // running stage swell and the nodes slide sideways as work
+              // advanced, which defeats the whole point of a milestone: the
+              // position is supposed to be the thing that does not move.
+              className={cn("flex items-center", i === 0 ? "shrink-0" : "min-w-0 flex-1")}
+            >
+              {i > 0 ? (
+                <span
+                  className={cn(
+                    "h-[3px] min-w-0 flex-1 overflow-hidden rounded-full",
+                    segmentClass(milestones[i - 1]!.state, m.state),
+                  )}
+                >
+                  {m.state === "running" ? (
+                    <span
+                      aria-hidden
+                      className="scan-sweep block h-full w-1/2 bg-gradient-to-r from-transparent via-white/50 to-transparent"
+                    />
+                  ) : null}
+                </span>
+              ) : null}
+              <Node milestone={m} size={size} />
+            </div>
+          ))}
+        </div>
       </div>
 
       {showLabels ? (
-        <div className="mt-1.5 flex items-start">
+        <div className="mt-1 flex items-start">
           {milestones.map((m, i) => (
             <div
               key={m.key}

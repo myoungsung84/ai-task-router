@@ -6,11 +6,8 @@ import { AlertTriangle, ShieldAlert } from "lucide-react";
 import { useTaskList } from "@/features/tasks/hooks/use-task-list";
 import { useDailySummary } from "@/features/history/hooks/use-daily-summary";
 import { useNowTick } from "@/features/tasks/hooks/use-now-tick";
-import { AGENT_LABEL } from "@/features/tasks/workflow-labels";
 import { statusGroupOf } from "@/features/tasks/types";
-import { cn, formatDuration, kstDateString } from "@/lib/format";
-import { deriveAgentPresence } from "../agent-activity";
-import { ACTIVITY_LABEL, AgentMark } from "./agent-character";
+import { cn, kstDateString } from "@/lib/format";
 import { ActivitySparkline } from "./activity-sparkline";
 
 /**
@@ -23,11 +20,13 @@ import { ActivitySparkline } from "./activity-sparkline";
  * glance at. It is also why this is allowed to be the one region of the app
  * that moves.
  *
- * Its second rule is that space is proportional to activity. The strip this
- * replaces reserved a full band to announce "할당된 작업 없음" twice, so the
- * page was at its largest with nothing happening. Idle here is a single line;
- * running work expands it, one row per busy Agent, and collapses again when
- * the work finishes.
+ * It is exactly one line, always. An earlier version expanded into a row per
+ * busy Agent naming the Task each was on — which is the question the list
+ * directly below already answers, in more detail and with the controls to act
+ * on it. Restating it here made the tower grow and shrink under the header for
+ * information nobody needed twice. What stays is only what the list cannot say
+ * about itself: whether anything is running at all, how long the workspace has
+ * been quiet, today's digest, and the alarms.
  */
 
 function todayKey(): string {
@@ -66,8 +65,6 @@ export function ControlTower() {
     return { running, queued, attention, createdToday, lastActivity: lastActivity ?? null };
   }, [tasks]);
 
-  const presence = useMemo(() => deriveAgentPresence(tasks), [tasks]);
-  const busy = presence.filter((p) => p.active.length > 0);
   const live = stats.running.length > 0;
 
   // The daily digest the server already computes (narrative sentence, security
@@ -162,40 +159,6 @@ export function ControlTower() {
             </span>
           </span>
         </div>
-
-        {/* Expansion — one row per Agent actually mid-Step. */}
-        {busy.length > 0 ? (
-          <div className="grid gap-1 pb-2 sm:grid-cols-2">
-            {busy.map((p) => {
-              const focus = p.active[0]!;
-              return (
-                <Link
-                  key={p.agent}
-                  href={`/tasks/${focus.jobId}`}
-                  className="flex min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors duration-fast hover:bg-fg/[0.05]"
-                >
-                  <AgentMark agent={p.agent} activity={p.activity} size={28} />
-                  <span className="flex min-w-0 flex-col">
-                    <span className="flex items-center gap-1.5 text-xs">
-                      <span className="font-medium text-fg">{AGENT_LABEL[p.agent]}</span>
-                      <span className="text-fg-muted">{ACTIVITY_LABEL[p.activity]}</span>
-                      {p.active.length > 1 ? (
-                        <span className="mono text-fg-faint">+{p.active.length - 1}</span>
-                      ) : null}
-                    </span>
-                    <span className="flex min-w-0 items-baseline gap-1.5 text-xs">
-                      <span className="mono shrink-0 text-fg-faint">{focus.jobId}</span>
-                      <span className="min-w-0 truncate text-fg-secondary">{focus.title}</span>
-                    </span>
-                  </span>
-                  <span className="mono ml-auto shrink-0 text-xs text-fg-muted">
-                    {focus.startedAt ? formatDuration(focus.startedAt, null) : ""}
-                  </span>
-                </Link>
-              );
-            })}
-          </div>
-        ) : null}
       </div>
     </div>
   );

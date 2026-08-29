@@ -58,11 +58,18 @@ const DRIVE_PATH_RUN = /[A-Za-z]:(?:\/[\w.~-]+(?: [\w.~-]+)*(?=\/))*\/[\w.~-]+/g
 const PATH_RUN = /(?:[A-Za-z]:)?\/?[\w.~-]+(?:\/[\w.~-]+)+\/?/g;
 
 /**
- * Zero-width and other format/control characters. They survive `trim()`, so a
- * title made only of them counts as "non-empty" and defeats the guarantee that
- * every Task is identifiable in a list.
+ * Zero-width and other invisible characters. They survive `trim()`, so a title
+ * made only of them counts as "non-empty" and defeats the guarantee that every
+ * Task is identifiable in a list.
+ *
+ * Line breaks and tabs are explicitly exempt even though they are `\p{Cc}`.
+ * Removing them silently welded a multi-line instruction into one line, so the
+ * "first line is the title" rule below had no lines to choose between and
+ * titles ran on into the request's own bullet list. They are also already
+ * handled: `trim()` treats them as whitespace, so an all-newline title still
+ * falls back correctly.
  */
-const INVISIBLE = /[\p{Cf}\p{Cc}]/gu;
+const INVISIBLE = /\p{Cf}|(?![\n\r\t])\p{Cc}/gu;
 
 /** Strips characters that take no space, so emptiness checks mean what they say. */
 export function stripInvisible(text: string): string {

@@ -99,22 +99,28 @@ export function ActiveTaskCard({
           ) : null}
         </div>
 
-        {/* The rail and the log trace sit together: both answer "is this
-            moving", so splitting them left the trace floating beside the
-            project name with nothing to relate it to. */}
-        <div className="flex min-w-0 items-end gap-3">
-          <StepTrack task={task} className="min-w-0 flex-1" />
-          {live && !isQueued ? <ActivityTrace logs={live.logs} className="shrink-0 pb-1" /> : null}
-        </div>
+        <StepTrack task={task} />
 
-        <div className="flex min-w-0 items-baseline gap-2 text-xs">
-          <span className="min-w-0 truncate text-fg-muted">{projectName(task.projectPath)}</span>
+        {/*
+          One line for "where and what": the project it runs in, the phrase for
+          whatever it is doing this second, and — last, where a colour still
+          catches the eye — the stall warning. These were previously split
+          across the rail row and the project row, which left the trace
+          floating beside a project name with nothing to relate it to.
+        */}
+        <div className="flex min-w-0 items-center gap-2 text-xs">
+          <span className="shrink-0 truncate text-fg-muted">{projectName(task.projectPath)}</span>
           {recentLog ? (
-            <span className="mono min-w-0 flex-1 truncate text-fg-faint">
-              <span aria-hidden>&gt; </span>
-              {recentLog}
-            </span>
-          ) : null}
+            <>
+              <span className="shrink-0 text-fg-faint" aria-hidden>
+                ·
+              </span>
+              <span className="min-w-0 flex-1 truncate text-fg-secondary">{recentLog}</span>
+            </>
+          ) : (
+            <span className="flex-1" />
+          )}
+          {live && !isQueued ? <ActivityTrace logs={live.logs} className="shrink-0" /> : null}
         </div>
       </div>
 
@@ -130,10 +136,14 @@ export function ActiveTaskCard({
           </IconButton>
         ) : null}
         {cancellable ? (
+          // Reddens on hover: stopping a run is destructive and irreversible,
+          // and a stop control that stays the same quiet grey as every other
+          // icon button gives no warning before the click.
           <IconButton
             label={isQueued ? "대기 취소" : "실행 중단"}
             size="sm"
             onClick={() => onCancelClick(listTask)}
+            className="hover:bg-danger/10 hover:text-danger"
           >
             <CircleStop className="h-4 w-4" aria-hidden />
           </IconButton>

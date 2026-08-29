@@ -1,7 +1,15 @@
 "use client";
 
+import { TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/format";
 import type { LogEntry } from "../types";
+
+/** "45초째" / "3분째" — a stall measured in minutes should not read as 214 seconds. */
+function formatSilence(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 90) return `${seconds}초째`;
+  return `${Math.floor(seconds / 60)}분째`;
+}
 
 /**
  * A seismograph for one Task: how much output the agent has produced over the
@@ -23,12 +31,34 @@ const WINDOW_MS = 60_000;
 const BUCKETS = 20;
 const BUCKET_MS = WINDOW_MS / BUCKETS;
 
-/** Silence past this reads as "possibly stuck" rather than "thinking". */
-const QUIET_MS = 30_000;
+/**
+ * Silence past this reads as "possibly stuck" — but only once the run has
+ * proved it streams at all (see `TraceState.silentFor`).
+ *
+ * Both numbers come from measured runs rather than taste. A Codex review
+ * streamed 282 lines steadily across 2m42s, then was orphaned by a server
+ * restart and went silent for over 200s — the case worth flagging. A Claude
+ * analyze, meanwhile, emitted its first line at 54s of a 55s run: it buffers
+ * everything and delivers at the end, so it is silent for essentially its
+ * whole duration while working perfectly.
+ *
+ * A flat 30s threshold therefore warned on every healthy Claude run. Ninety
+ * seconds sits well clear of normal streaming gaps and well under a real
+ * stall, and the "has it ever spoken" gate below is what keeps a buffering
+ * agent from tripping it at all.
+ */
+const QUIET_MS = 90_000;
 
 export interface TraceState {
   buckets: number[];
-  /** ms since the most recent log line, or null when there has never been one. */
+  /**
+   * ms since the most recent log line, or null when the run has never produced
+   * one.
+   *
+   * The null case is load-bearing: an agent that has said nothing yet is not
+   * stalled, it is buffering, and Claude buffers its entire run. Only a stream
+   * that started and then stopped is evidence of a problem.
+   */
   silentFor: number | null;
 }
 
@@ -48,7 +78,13 @@ export function computeTrace(logs: LogEntry[], now: number): TraceState {
   let newest = 0;
 
   for (let i = logs.length - 1; i >= 0; i--) {
-    const t = new Date(logs[i]!.timestamp).getTime();
+    const log = logs[i]!;
+    // The router's own commentary ("Claude 구현 시작.") is not the agent
+    // working; counting it would keep the trace alive through exactly the
+    // silence it exists to reveal.
+    if (log.source === "system") continue;
+
+    const t = new Date(log.timestamp).getTime();
     if (t > newest) newest = t;
     const age = now - t;
     // Older than the window — and so is everything before it.
@@ -93,9 +129,18 @@ export function ActivityTrace({
           />
         ))}
       </span>
+      {/*
+        A stalled run is the one thing this component exists to catch, so it
+        says so in warning tone rather than as another grey caption. It earned
+        the promotion in practice: a Codex review was orphaned by a server
+        restart and sat silent for minutes, and the trace *had* detected it —
+        but stated it quietly enough that nobody noticed until the screen was
+        looked at deliberately.
+      */}
       {quiet ? (
-        <span className="shrink-0 text-xs text-fg-faint">
-          {Math.floor((silentFor ?? 0) / 1000)}초째 출력 없음
+        <span className="flex shrink-0 items-center gap-1 rounded-full bg-warning/12 px-2 py-0.5 text-xs font-medium text-warning">
+          <TriangleAlert className="h-3 w-3" aria-hidden />
+          {formatSilence(silentFor ?? 0)} 출력 없음
         </span>
       ) : null}
     </span>
