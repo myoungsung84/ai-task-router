@@ -11,7 +11,7 @@ import {
   ChevronUp,
   Play,
   RotateCcw,
-  Square,
+  CircleStop,
   Trash2,
 } from "lucide-react";
 import { useTask } from "../hooks/use-task";
@@ -462,7 +462,7 @@ export function TaskDetail({ id }: { id: string }) {
             <Button
               variant="outline"
               size="sm"
-              icon={<Square className="h-3.5 w-3.5" />}
+              icon={<CircleStop className="h-3.5 w-3.5" />}
               onClick={() => setConfirmingCancel(true)}
               disabled={actionBusy}
             >

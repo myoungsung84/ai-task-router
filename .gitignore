@@ -23,3 +23,6 @@ Thumbs.db
 
 # test scratch repos
 scratch/
+
+# Cygwin/MSYS crash dumps (bash.exe.stackdump) — never source
+*.stackdump

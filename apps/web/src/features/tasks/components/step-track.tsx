@@ -1,26 +1,36 @@
 "use client";
 
+import { Check, X } from "lucide-react";
 import { cn, formatDuration } from "@/lib/format";
 import { ACTION_LABEL, AGENT_LABEL } from "../workflow-labels";
-import type { AgentName, WorkflowStep } from "../types";
+import type { AgentName, Task, TaskListItem, WorkflowStep } from "../types";
 
 /**
- * A Task's Steps as one horizontal track.
+ * A Task's journey as a milestone rail: a fixed node per stage, joined by
+ * segments that fill as the work advances.
  *
- * Not a percentage bar: nothing in this system reports how far through a Step
- * an agent is, so a filling bar would be invented. What *is* known is which
- * Step is live, who owns it, and how long each one actually took — so the
- * track shows stages rather than a fraction, and the live stage is filled with
- * a sweep (motion meaning "working") instead of a number meaning "almost
- * done".
+ * Two things make this not a progress bar.
  *
- * Segment width is not proportional to duration either. A 4-second git check
- * next to a 6-minute implement would collapse to a sliver, and the sliver that
- * vanishes is usually the one that failed. The running Step takes the extra
- * space instead, so the track leans toward what is happening now.
+ * First, no fraction is ever claimed. Nothing in this system reports how far
+ * through a Step an agent is — a Step is RUNNING or it is not — so the live
+ * segment carries a sweep (motion meaning "working") rather than a width
+ * meaning "almost done".
+ *
+ * Second, the node count and their positions never change for the life of a
+ * Task. `workflow.steps` is built at creation with every Step PENDING, so the
+ * shape is known before anything runs: a queued Task already shows "two
+ * stages, Claude implements then Codex reviews". Nothing appears or
+ * disappears afterwards, so the row never reflows, and the same rail is
+ * legible at card size and at row size without the eye relearning it.
+ *
+ * The 시작 node exists for the single-Step case. Without it a review-only Task
+ * would be one segment that is full from the moment it starts — exactly the
+ * "100% but still running" reading this component exists to avoid.
  */
 
-const AGENT_FILL: Record<AgentName, string> = {
+type NodeState = "pending" | "done" | "running" | "failed" | "skipped" | "cancelled";
+
+const AGENT_DOT: Record<AgentName, string> = {
   claude: "bg-agent-claude",
   codex: "bg-agent-codex",
 };
@@ -30,88 +40,213 @@ const AGENT_TEXT: Record<AgentName, string> = {
   codex: "text-agent-codex",
 };
 
-function segmentClass(step: WorkflowStep): string {
+function nodeStateOf(step: WorkflowStep): NodeState {
   switch (step.status) {
     case "SUCCESS":
-      return cn(AGENT_FILL[step.agent], "opacity-70");
+      return "done";
     case "RUNNING":
-      return cn(AGENT_FILL[step.agent], "opacity-95");
+      return "running";
     case "FAILED":
-      return "bg-danger";
+      return "failed";
     case "SKIPPED":
-      // Hatched rather than merely dim: a skipped review is a real outcome
-      // ("리뷰할 변경 없음"), not an empty slot waiting to be filled.
-      return "bg-fg/15 [background-image:repeating-linear-gradient(135deg,transparent_0_3px,rgb(var(--fg)/0.18)_3px_6px)]";
+      return "skipped";
     case "CANCELLED":
-      return "bg-fg/20";
+      return "cancelled";
     default:
-      return "bg-fg/[0.09]";
+      return "pending";
   }
 }
 
-/** One Step's own label under the track. */
-function StepLabel({ step, live }: { step: WorkflowStep; live: boolean }) {
+/** A stage the rail draws: the synthetic 시작 node, then one per Step. */
+interface Milestone {
+  key: string;
+  state: NodeState;
+  /** null for 시작, which belongs to no Agent. */
+  step: WorkflowStep | null;
+}
+
+function buildMilestones(task: Pick<Task, "startedAt" | "workflow">): Milestone[] {
+  const steps = task.workflow?.steps ?? [];
+  return [
+    // Filled only once the Task actually began — that is what separates
+    // "sitting in the queue" from "running", which a QUEUED Task otherwise
+    // has no way to show.
+    { key: "__start", state: task.startedAt ? "done" : "pending", step: null },
+    ...steps.map((step) => ({ key: step.id, state: nodeStateOf(step), step })),
+  ];
+}
+
+/** The segment leading *into* a node — filled when the previous stage is behind us. */
+function segmentClass(prev: NodeState, next: NodeState): string {
+  if (next === "failed") return "bg-danger/70";
+  if (next === "running") return "bg-fg/12";
+  if (next === "skipped") {
+    return "bg-fg/10 [background-image:repeating-linear-gradient(135deg,transparent_0_3px,rgb(var(--fg)/0.16)_3px_6px)]";
+  }
+  if (next === "done") return "bg-fg/30";
+  // Not reached yet.
+  return prev === "pending" ? "bg-fg/[0.08]" : "bg-fg/[0.08]";
+}
+
+function Node({ milestone, size }: { milestone: Milestone; size: "sm" | "md" }) {
+  const { state, step } = milestone;
+  const box = size === "md" ? "h-3 w-3" : "h-2 w-2";
+  const icon = size === "md" ? "h-2 w-2" : "h-1.5 w-1.5";
+
+  if (state === "failed") {
+    return (
+      <span
+        className={cn(
+          "z-10 flex shrink-0 items-center justify-center rounded-full bg-danger text-bg",
+          box,
+        )}
+      >
+        <X className={icon} strokeWidth={4} aria-hidden />
+      </span>
+    );
+  }
+
+  if (state === "done" && step) {
+    return (
+      <span
+        className={cn(
+          "z-10 flex shrink-0 items-center justify-center rounded-full text-bg",
+          AGENT_DOT[step.agent],
+          box,
+        )}
+      >
+        <Check className={icon} strokeWidth={4} aria-hidden />
+      </span>
+    );
+  }
+
+  if (state === "running" && step) {
+    return (
+      <span className={cn("relative z-10 flex shrink-0 items-center justify-center", box)}>
+        {/* A halo, not a fill: the node marks where the work *is*, and a solid
+            dot would read the same as the completed ones behind it. */}
+        <span
+          className={cn(
+            "absolute inset-0 animate-ping rounded-full opacity-60",
+            AGENT_DOT[step.agent],
+          )}
+          aria-hidden
+        />
+        <span className={cn("relative rounded-full ring-2 ring-bg", AGENT_DOT[step.agent], box)} />
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className={cn(
+        "z-10 shrink-0 rounded-full",
+        box,
+        state === "skipped"
+          ? "bg-fg/25"
+          : state === "cancelled"
+            ? "bg-fg/20"
+            : state === "done"
+              ? "bg-fg/40"
+              : "bg-fg/15 ring-2 ring-bg",
+      )}
+    />
+  );
+}
+
+/** One stage's caption, anchored under its own node rather than packed to the left. */
+function NodeLabel({ milestone }: { milestone: Milestone }) {
+  const { state, step } = milestone;
+  if (!step) {
+    return <span className="text-xs text-fg-faint">시작</span>;
+  }
+
   const duration =
-    step.startedAt && (step.completedAt || live)
+    step.startedAt && (step.completedAt || state === "running")
       ? formatDuration(step.startedAt, step.completedAt)
       : null;
+
   return (
-    <span className="flex min-w-0 items-baseline gap-1 text-xs">
-      <span className={cn("shrink-0 font-medium", live ? AGENT_TEXT[step.agent] : "text-fg-muted")}>
-        {AGENT_LABEL[step.agent]}
+    <span className="flex min-w-0 flex-col leading-tight">
+      <span className="flex items-baseline gap-1">
+        <span
+          className={cn(
+            "truncate text-xs font-medium",
+            state === "running" ? AGENT_TEXT[step.agent] : "text-fg-muted",
+          )}
+        >
+          {AGENT_LABEL[step.agent]}
+        </span>
+        <span className="shrink-0 text-xs text-fg-faint">{ACTION_LABEL[step.action]}</span>
       </span>
-      <span className="shrink-0 text-fg-faint">{ACTION_LABEL[step.action]}</span>
-      {step.status === "SKIPPED" ? (
-        <span className="shrink-0 text-fg-faint">생략</span>
-      ) : duration ? (
-        <span className="mono shrink-0 text-fg-faint">{duration}</span>
-      ) : null}
+      <span className="mono text-xs text-fg-faint">
+        {state === "skipped"
+          ? "생략"
+          : state === "failed"
+            ? "실패"
+            : state === "cancelled"
+              ? "중단"
+              : (duration ?? "대기")}
+      </span>
     </span>
   );
 }
 
 export function StepTrack({
-  steps,
-  className,
+  task,
   showLabels = true,
+  size = "md",
+  className,
 }: {
-  steps: WorkflowStep[];
-  className?: string;
-  /** Off for dense contexts (a compact row) where the track alone is the signal. */
+  task: Pick<Task, "startedAt" | "workflow"> | TaskListItem;
+  /** Off for the compact list rows, where the rail alone carries the signal. */
   showLabels?: boolean;
+  size?: "sm" | "md";
+  className?: string;
 }) {
-  if (steps.length === 0) return null;
+  const milestones = buildMilestones(task);
+  if (milestones.length < 2) return null;
 
   return (
-    <div className={cn("space-y-1.5", className)}>
-      <div className="flex h-1.5 items-stretch gap-1 overflow-hidden rounded-full">
-        {steps.map((step) => {
-          const running = step.status === "RUNNING";
-          return (
-            <span
-              key={step.id}
-              // The running Step gets the surplus width; the rest share a base
-              // so a two-Step Task never renders as one full-width block.
-              style={{ flex: running ? "2 1 0%" : "1 1 0%" }}
-              className={cn("relative overflow-hidden rounded-full", segmentClass(step))}
-              title={`${AGENT_LABEL[step.agent]} ${ACTION_LABEL[step.action]}`}
-            >
-              {running ? (
-                // Motion that means "in progress" without asserting a fraction.
-                <span
-                  aria-hidden
-                  className="scan-sweep absolute inset-y-0 w-1/2 bg-gradient-to-r from-transparent via-white/45 to-transparent"
-                />
-              ) : null}
-            </span>
-          );
-        })}
+    <div className={cn("min-w-0", className)}>
+      <div className="flex items-center">
+        {milestones.map((m, i) => (
+          <div
+            key={m.key}
+            className={cn("flex items-center", i === 0 ? "shrink-0" : "min-w-0 flex-1")}
+          >
+            {i > 0 ? (
+              <span
+                className={cn(
+                  "h-[3px] min-w-0 flex-1 overflow-hidden rounded-full",
+                  segmentClass(milestones[i - 1]!.state, m.state),
+                )}
+              >
+                {m.state === "running" ? (
+                  <span
+                    aria-hidden
+                    className="scan-sweep block h-full w-1/2 bg-gradient-to-r from-transparent via-white/50 to-transparent"
+                  />
+                ) : null}
+              </span>
+            ) : null}
+            <Node milestone={m} size={size} />
+          </div>
+        ))}
       </div>
 
       {showLabels ? (
-        <div className="flex items-baseline gap-3">
-          {steps.map((step) => (
-            <StepLabel key={step.id} step={step} live={step.status === "RUNNING"} />
+        <div className="mt-1.5 flex items-start">
+          {milestones.map((m, i) => (
+            <div
+              key={m.key}
+              className={cn(
+                "flex min-w-0",
+                i === 0 ? "shrink-0 justify-start" : "flex-1 justify-end",
+              )}
+            >
+              <NodeLabel milestone={m} />
+            </div>
           ))}
         </div>
       ) : null}

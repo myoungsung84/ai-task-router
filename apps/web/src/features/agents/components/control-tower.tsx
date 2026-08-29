@@ -2,8 +2,9 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, ShieldAlert } from "lucide-react";
 import { useTaskList } from "@/features/tasks/hooks/use-task-list";
+import { useDailySummary } from "@/features/history/hooks/use-daily-summary";
 import { useNowTick } from "@/features/tasks/hooks/use-now-tick";
 import { AGENT_LABEL } from "@/features/tasks/workflow-labels";
 import { statusGroupOf } from "@/features/tasks/types";
@@ -69,6 +70,16 @@ export function ControlTower() {
   const busy = presence.filter((p) => p.active.length > 0);
   const live = stats.running.length > 0;
 
+  // The daily digest the server already computes (narrative sentence, security
+  // counts). It used to have its own dashboard card that reserved a block to
+  // report an empty day; the numbers belong here, on the row that already
+  // states the workspace's condition.
+  const { summary } = useDailySummary(todayKey());
+  const securityCount = (summary?.securityCritical ?? 0) + (summary?.securityHigh ?? 0);
+  // Suppressed on an empty day: "오늘 생성된 Task가 없습니다" is exactly what the
+  // "오늘 0건" counter beside it already says.
+  const summaryLine = summary && summary.totalTasks > 0 ? summary.narrativeSummary : null;
+
   // Keeps the elapsed readouts moving while something is genuinely running.
   useNowTick(live);
 
@@ -113,7 +124,30 @@ export function ControlTower() {
             오늘 <span className="mono text-fg-muted">{stats.createdToday.length}</span>건
           </span>
 
+          {/*
+            Today's server-computed digest, folded into this row rather than
+            given a card of its own. As a card it spent a whole block saying
+            "0 Task" on a quiet morning; here it takes the space it has and
+            truncates, so a busy day says more and a quiet one says nothing.
+          */}
+          {summaryLine ? (
+            <span className="hidden min-w-0 flex-1 truncate text-fg-faint lg:inline">
+              {summaryLine}
+            </span>
+          ) : null}
+
           <span className="ml-auto flex shrink-0 items-center gap-3">
+            {/* Security findings outrank the digest text they came from — the
+                one part of a daily summary worth interrupting for. */}
+            {securityCount > 0 ? (
+              <Link
+                href="/?filter=attention"
+                className="flex items-center gap-1.5 rounded-full bg-danger/12 px-2.5 py-1 font-medium text-danger transition-colors duration-fast hover:bg-danger/20"
+              >
+                <ShieldAlert className="h-3.5 w-3.5" aria-hidden />
+                Security {securityCount}
+              </Link>
+            ) : null}
             {stats.attention.length > 0 ? (
               <Link
                 href="/?filter=attention"

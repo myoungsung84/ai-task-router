@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Play, Square } from "lucide-react";
+import { CircleStop, Play } from "lucide-react";
 import { IconButton } from "@/components/button";
 import { AgentMark } from "@/features/agents/components/agent-character";
 import { deriveAgentPresence } from "@/features/agents/agent-activity";
@@ -11,6 +11,7 @@ import { useNowTick } from "../hooks/use-now-tick";
 import { ActivityTrace } from "./activity-trace";
 import { JobIdTag } from "./job-id-tag";
 import { StepTrack } from "./step-track";
+import { pickLogLine } from "../lib/pick-log-line";
 import type { TaskListItem, WorkflowStep } from "../types";
 
 /**
@@ -67,9 +68,8 @@ export function ActiveTaskCard({
     ? (deriveAgentPresence([task], [step.agent])[0]?.activity ?? "idle")
     : "idle";
 
-  const recentLog = live
-    ? [...live.logs].reverse().find((l) => l.source !== "system" && l.text.trim())
-    : undefined;
+  // Prefers the agent's own words over its shell plumbing — see pickLogLine.
+  const recentLog = live ? pickLogLine(live.logs) : null;
 
   return (
     <div className="group relative flex items-start gap-4 px-4 py-4 transition-colors duration-fast hover:bg-fg/[0.03]">
@@ -89,26 +89,33 @@ export function ActiveTaskCard({
           >
             {task.title}
           </Link>
-          <span className="mono ml-auto shrink-0 text-xs text-fg-muted">
-            {task.startedAt ? formatDuration(task.startedAt, task.completedAt) : "—"}
-          </span>
+          {/* Total elapsed, but only when it isn't the same number the rail is
+              already showing: a single-Step Task's total *is* its Step's
+              duration, and printing it twice reads as two different facts. */}
+          {steps.length > 1 && task.startedAt ? (
+            <span className="mono ml-auto shrink-0 text-xs text-fg-muted">
+              {formatDuration(task.startedAt, task.completedAt)}
+            </span>
+          ) : null}
         </div>
 
-        <StepTrack steps={steps} />
+        {/* The rail and the log trace sit together: both answer "is this
+            moving", so splitting them left the trace floating beside the
+            project name with nothing to relate it to. */}
+        <div className="flex min-w-0 items-end gap-3">
+          <StepTrack task={task} className="min-w-0 flex-1" />
+          {live && !isQueued ? <ActivityTrace logs={live.logs} className="shrink-0 pb-1" /> : null}
+        </div>
 
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        <div className="flex min-w-0 items-baseline gap-2 text-xs">
           <span className="min-w-0 truncate text-fg-muted">{projectName(task.projectPath)}</span>
-          {/* Log arrival over the last minute — the one honest "is it actually
-              working" signal this system has (see ActivityTrace). */}
-          {live && !isQueued ? <ActivityTrace logs={live.logs} className="ml-auto" /> : null}
+          {recentLog ? (
+            <span className="mono min-w-0 flex-1 truncate text-fg-faint">
+              <span aria-hidden>&gt; </span>
+              {recentLog}
+            </span>
+          ) : null}
         </div>
-
-        {recentLog ? (
-          <p className="mono truncate text-xs text-fg-faint">
-            <span aria-hidden>&gt; </span>
-            {recentLog.text}
-          </p>
-        ) : null}
       </div>
 
       <div className="relative z-10 flex shrink-0 items-center">
@@ -128,7 +135,7 @@ export function ActiveTaskCard({
             size="sm"
             onClick={() => onCancelClick(listTask)}
           >
-            <Square className="h-4 w-4" aria-hidden />
+            <CircleStop className="h-4 w-4" aria-hidden />
           </IconButton>
         ) : null}
       </div>
