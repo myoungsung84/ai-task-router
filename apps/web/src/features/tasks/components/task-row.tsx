@@ -84,12 +84,25 @@ function truncateResult(text: string): string {
 }
 
 /**
- * The single most useful sentence about this Task's outcome: for a Task
- * that needs attention, the first concrete review issue or failure reason;
- * otherwise the neutral state phrase. Never the raw multi-line message —
- * one row must never grow tall enough to dominate the list.
+ * The single most useful sentence about this Task's outcome — or `null` when
+ * there is no such sentence and the status badge already carries everything
+ * this row knows. Never the raw multi-line message: one row must never grow
+ * tall enough to dominate the list.
+ *
+ * `null` rather than a phrase restating the status, because that fallback
+ * asserted things that were not true. `READY` read "지적 사항 없음" even for an
+ * `analyze` Task, whose workflow has no review Step at all (buildWorkflowForPurpose
+ * gives it a single `analyze` Step), and for an `implement` Task whose review was
+ * SKIPPED on NO_CHANGES — a verdict nobody ever handed down, printed where the real
+ * outcome should be. `WARNING` + REVIEW_FAILED was worse: the review process itself
+ * died, so `issues` is empty, and the row contradicted its own badge — `리뷰 실행 실패`
+ * beside "검토 지적 사항 있음". `CANCELLED` and a `FAILED` carrying no error text
+ * merely said the badge over again.
+ *
+ * A Task still in flight keeps its phrase, because there it is real information the
+ * badge cannot carry: `실행 중` does not say which agent is doing what.
  */
-function resultLine(task: TaskListItem): { text: string; tone: "warning" | "muted" } {
+function resultLine(task: TaskListItem): { text: string; tone: "warning" | "muted" } | null {
   if (task.status === "WARNING") {
     // Same priority as the reason chip next to this text: a Security issue
     // (then highest severity) is the most useful single line to show, not
@@ -115,7 +128,16 @@ function resultLine(task: TaskListItem): { text: string; tone: "warning" | "mute
     const text = failed?.error ? `${AGENT_LABEL[failed.agent]}: ${failed.error}` : task.error;
     if (text) return { text: truncateResult(text), tone: "warning" };
   }
-  return { text: taskActivityPhrase(task), tone: "muted" };
+  // Reached by an attention Task with no concrete detail to show (a review that
+  // produced no issues, a failure that recorded no error) and by the whole 완료
+  // group. Attention rows keep their second line either way — the reason badge
+  // sits on it — so 완료 rows are the only ones that lose one, and all of them
+  // do. Collapsing by status *inside* a group would alternate row heights down
+  // the list instead.
+  if (task.status === "QUEUED" || task.status === "RUNNING" || task.status === "REVIEWING") {
+    return { text: taskActivityPhrase(task), tone: "muted" };
+  }
+  return null;
 }
 
 /** Column headings for the list — same widths as the rows below, so the list reads as a table rather than a stack of unrelated blocks even when it holds a single item. */
@@ -159,10 +181,11 @@ function RowShell({
   const result = resultLine(task);
   const attentionReason = attentionReasonOf(task);
   const agents = Array.from(new Set(task.workflow.steps.map((s) => s.agent)));
-  // py-4, on the documented 4px scale (see globals.css "Spacing"). These rows
-  // carry two lines — title, then outcome — but kept the padding chosen when
-  // they carried one, so the text ran nearly edge to edge and the list read as
-  // cramped. The rows had not grown; their contents had.
+  // py-4, on the documented 4px scale (see globals.css "Spacing"). Rows that
+  // carry two lines — title, then outcome — kept the padding chosen when they
+  // carried one, so the text ran nearly edge to edge and the list read as
+  // cramped. The rows had not grown; their contents had. 완료 rows carry the
+  // title alone and settle back to one line on the same padding.
   return (
     <div className={cn(ROW_BASE, "py-4", className)}>
       <span
@@ -196,21 +219,25 @@ function RowShell({
             <TaskStatusBadge status={task.status} />
           </span>
         </div>
-        <p className="mt-1 flex min-w-0 items-baseline gap-1.5 text-xs">
-          {attentionReason ? (
-            <Badge tone={ATTENTION_REASON_TONE[attentionReason]} className="shrink-0">
-              {ATTENTION_REASON_LABEL[attentionReason]}
-            </Badge>
-          ) : null}
-          <span
-            className={cn(
-              "min-w-0 truncate",
-              result.tone === "warning" ? "text-warning" : "text-fg-muted",
-            )}
-          >
-            {result.text}
-          </span>
-        </p>
+        {attentionReason || result ? (
+          <p className="mt-1 flex min-w-0 items-baseline gap-1.5 text-xs">
+            {attentionReason ? (
+              <Badge tone={ATTENTION_REASON_TONE[attentionReason]} className="shrink-0">
+                {ATTENTION_REASON_LABEL[attentionReason]}
+              </Badge>
+            ) : null}
+            {result ? (
+              <span
+                className={cn(
+                  "min-w-0 truncate",
+                  result.tone === "warning" ? "text-warning" : "text-fg-muted",
+                )}
+              >
+                {result.text}
+              </span>
+            ) : null}
+          </p>
+        ) : null}
       </div>
       <div className={COL.agents}>
         <AgentStack agents={agents} />
