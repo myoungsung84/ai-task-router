@@ -145,9 +145,21 @@ export class DiscussionService {
     return this.load(roomId);
   }
 
-  /** The file itself — this is what an AI reads before it answers. */
-  document(roomId: string): string {
+  /**
+   * The file itself — this is what an AI reads before it answers.
+   *
+   * Naming the reader records it against the open round. Asking whether it is
+   * your turn is not the same as going to the document, and the room draws
+   * 문서 읽음 rather than "claimed a turn" — so the signal has to come from the
+   * call that actually hands the bytes over, or the rail is telling a story
+   * about a step nobody took.
+   */
+  document(roomId: string, agent?: AgentName): string {
     this.load(roomId);
+    if (agent) {
+      const open = this.rt(roomId).open;
+      if (open && !open.claimed.includes(agent)) open.claimed.push(agent);
+    }
     return documentStore.raw(roomId);
   }
 
@@ -366,9 +378,6 @@ export class DiscussionService {
     // A parallel round lets everyone still queued go at once; a sequential one
     // only the agent at the head.
     const yourTurn = open.parallel ? open.queue.includes(agent) : open.queue[0] === agent;
-    // Recorded so the room can show that this agent went to the document
-    // before answering — the one part of a turn the Router can actually see.
-    if (yourTurn && !open.claimed.includes(agent)) open.claimed.push(agent);
     return {
       yourTurn,
       roundId: open.roundId,

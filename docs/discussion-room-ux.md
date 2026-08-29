@@ -459,9 +459,16 @@ create_discussion / list_discussions / add_discussion_repo
 
 `config.discussionsDir` — 기본값 `<dataDir>/discussions`, `DISCUSSIONS_DIR`로 교체. 모든 경로는 허용 루트 아래로 해석되고 벗어나면 거부한다(`../../secret` → 400). 회사 환경의 `work-log` 계열로 옮길 때는 이 값만 바꾼다. 다만 §11에 적어둔 대로 **파일명·하위 폴더·양식은 샘플 확인 후 확정**한다.
 
+### 논의 스킬
+
+`docs/discussion-skill.md` — 도구가 일부러 비워둔 판단층. Claude Code는 `.claude/skills/discussion/SKILL.md`가 이 파일을 가리키고, Codex도 같은 파일을 본다. 참가자마다 규칙이 갈리면 "문서가 단일 기준"이 성립하지 않으므로 본문은 한 곳에만 둔다.
+
+스킬이 실제로 막는 것: `확인된 사실`에 추정을 넣지 않기, 방을 만든 직후에도 문서를 다시 읽기(만든 AI가 제일 건너뛰기 쉽다), 새 근거 없이 발언하지 않기, 지목받았는데 근거가 없으면 없다고 말하기.
+
+> **정정**: `claimed`를 `claim_discussion_turn`에서 세팅했었다. 차례를 물은 것과 문서를 가져간 것은 다른 행동이고 화면이 그리는 건 후자라, `read_discussion_document`가 `agent`를 받아 표시하도록 옮겼다. 실측: 차례만 물으면 `[]`, 문서를 읽으면 `['claude']`.
+
 ### 아직 없는 것
 
 - **자동 실행** — Router가 라운드를 돌 때 runner를 호출하는 것. 지금은 사람이 각 AI 세션에서 진행시킨다.
-- **논의 시작 스킬** — 대화를 §5 구조로 접는 프롬프트. 도구는 준비됐고 판단이 없다.
 - **재개 필요 복구 흐름** — 상태는 표시되지만 중단된 라운드를 이어받는 UI는 없다.
 - **`discussion-utterance.ts`** — 여전히 키워드 매칭이고 버릴 코드다. §11-3이 정해지기 전까지 서버 계약이 아니다.

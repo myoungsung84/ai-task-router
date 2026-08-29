@@ -107,8 +107,9 @@ discussionRouter.get("/:id", (req, res) => {
 
 /** The document itself — the same bytes an agent reads before it answers. */
 discussionRouter.get("/:id/document", (req, res) => {
+  const agent = typeof req.query.agent === "string" ? (req.query.agent as AgentName) : undefined;
   try {
-    res.type("text/markdown").send(discussionService.document(roomId(req)));
+    res.type("text/markdown").send(discussionService.document(roomId(req), agent));
   } catch (err) {
     fail(res, err);
   }

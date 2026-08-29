@@ -141,11 +141,14 @@ export interface RoundState {
   /**
    * Who has fetched the document for this round.
    *
+   * Set when the agent actually fetches it, not when it asks whose turn it is —
+   * those are different acts and only one of them is 문서 읽음.
+   *
    * The only progress signal the Router honestly has. How far through its own
-   * reasoning an agent is, it alone knows; that it has asked for the document
-   * is observable, and it is the one stage worth showing because it is the
-   * proposal's first rule made visible — an answer comes from the record, not
-   * from the chat above it.
+   * reasoning an agent is, it alone knows; that it took the document is
+   * observable, and it is the one stage worth drawing because it makes the
+   * first rule visible — an answer comes from the record, not from the chat
+   * above it.
    */
   claimed: AgentName[];
   /** Gate 2 is skipped for these — the user asked them directly. */

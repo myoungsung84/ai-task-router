@@ -109,11 +109,16 @@ export function registerDiscussionTools(server: McpServer): void {
         "원본 논의 문서 전체를 마크다운 그대로 반환한다. 발언하기 전에 반드시 이걸 읽어라 — 채팅 요약이 " +
         "아니라 이 문서가 판단의 유일한 기준이다. 앞선 AI의 상세 근거, 사용자 의견과 결정, 확인된 사실이 " +
         "모두 여기에 있다. 문서는 append-only라 항목 번호(#47)는 영구적이며, 인용할 때 그 번호를 쓴다.",
-      inputSchema: { discussionId: z.string().describe(ROOM_ID) },
+      inputSchema: {
+        discussionId: z.string().describe(ROOM_ID),
+        agent: agentSchema
+          .optional()
+          .describe("내가 누구인지. 넘기면 이번 라운드에 문서를 읽었다고 방에 표시된다"),
+      },
     },
     async (args) => {
       try {
-        return markdownResult(discussionService.document(args.discussionId));
+        return markdownResult(discussionService.document(args.discussionId, args.agent));
       } catch (err) {
         return errorResult(messageOf(err));
       }
