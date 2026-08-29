@@ -121,7 +121,7 @@ function resultLine(task: TaskListItem): { text: string; tone: "warning" | "mute
 /** Column headings for the list — same widths as the rows below, so the list reads as a table rather than a stack of unrelated blocks even when it holds a single item. */
 export function TaskListHeader() {
   return (
-    <div className="flex items-center gap-4 border-b border-border bg-fg/[0.02] px-4 py-2 text-xs font-medium uppercase tracking-wider text-fg-muted">
+    <div className="flex items-center gap-4 border-b border-border bg-fg/[0.02] px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-fg-muted">
       <div className={COL.status}>상태</div>
       <div className="min-w-0 flex-1">작업</div>
       <div className={COL.agents}>담당</div>
@@ -149,20 +149,22 @@ function AgentStack({ agents }: { agents: TaskListItem["workflow"]["steps"][numb
 
 function RowShell({
   task,
-  extra,
   actions,
   className,
 }: {
   task: TaskListItem;
-  extra?: ReactNode;
   actions: ReactNode;
   className?: string;
 }) {
   const result = resultLine(task);
   const attentionReason = attentionReasonOf(task);
   const agents = Array.from(new Set(task.workflow.steps.map((s) => s.agent)));
+  // py-4, on the documented 4px scale (see globals.css "Spacing"). These rows
+  // carry two lines — title, then outcome — but kept the padding chosen when
+  // they carried one, so the text ran nearly edge to edge and the list read as
+  // cramped. The rows had not grown; their contents had.
   return (
-    <div className={cn(ROW_BASE, extra ? "py-3" : "py-2.5", className)}>
+    <div className={cn(ROW_BASE, "py-4", className)}>
       <span
         aria-hidden
         className={cn("absolute inset-y-0 left-0 w-[3px]", STATUS_RAIL[task.status])}
@@ -194,7 +196,7 @@ function RowShell({
             <TaskStatusBadge status={task.status} />
           </span>
         </div>
-        <p className="mt-0.5 flex min-w-0 items-baseline gap-1.5 text-xs">
+        <p className="mt-1 flex min-w-0 items-baseline gap-1.5 text-xs">
           {attentionReason ? (
             <Badge tone={ATTENTION_REASON_TONE[attentionReason]} className="shrink-0">
               {ATTENTION_REASON_LABEL[attentionReason]}
@@ -209,7 +211,6 @@ function RowShell({
             {result.text}
           </span>
         </p>
-        {extra}
       </div>
       <div className={COL.agents}>
         <AgentStack agents={agents} />
