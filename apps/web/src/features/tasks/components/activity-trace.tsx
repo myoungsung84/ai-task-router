@@ -31,12 +31,14 @@ function formatSilence(ms: number): string {
 
 const WINDOW_MS = 60_000;
 /**
- * Wide enough to read as an equalizer across a full-width card rather than as
- * a row of ticks. At a 60s window this is a 1.25s bucket, finer than the 3s
- * the corner widget used — which only ever mattered for Codex, the one agent
- * that streams finely enough to fill them.
+ * One bucket per second of the window, which is also the rate the card
+ * re-renders at (`useNowTick`) — going finer would draw a resolution the
+ * screen never actually refreshes at.
+ *
+ * It doubles as the visual density, and at 60 the two wants agree: denser bars
+ * than the 48 this started with, and a bucket whose meaning is legible.
  */
-const BUCKETS = 48;
+const BUCKETS = 60;
 const BUCKET_MS = WINDOW_MS / BUCKETS;
 
 /**
@@ -191,7 +193,7 @@ function EqualizerLayer({
   return (
     <span
       aria-hidden
-      className="pointer-events-none absolute inset-x-0 bottom-0 flex h-[64%] items-end gap-[3px] overflow-hidden"
+      className="pointer-events-none absolute inset-x-0 bottom-0 flex h-[64%] items-end gap-[2px] overflow-hidden"
       style={{ opacity: visible ? 1 : 0, transition: `opacity ${FADE_MS}ms ease` }}
     >
       {buckets.map((count, i) => (
@@ -204,9 +206,17 @@ function EqualizerLayer({
           )}
           style={
             buffering
-              ? // 48 bars × 44ms ≈ the 2.1s cycle, so the swell crosses the
-                // card exactly once per period and wraps without a seam.
-                { animationDelay: `${i * 44}ms` }
+              ? /*
+                 * Negative, and spaced so the phase wraps three times across
+                 * the card: 1800ms × 3 / 60 bars = 90ms.
+                 *
+                 * Three crests means several parts of the row are always in
+                 * motion instead of one swell passing through. Negative starts
+                 * every bar mid-cycle on the first frame — with the positive
+                 * delays this used, the far end of the row stood still for up
+                 * to two seconds after a card appeared.
+                 */
+                { animationDelay: `${-(i * 90)}ms` }
               : {
                   transform: `scaleY(${count === 0 ? 0.015 : Math.max(0.06, count / peak)})`,
                   transition: "transform 400ms ease-out",

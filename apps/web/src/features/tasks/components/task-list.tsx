@@ -18,7 +18,7 @@ import { useToast } from "@/components/toast";
 import { projectName } from "@/lib/format";
 import { describeRange, isWithinRange } from "../date-range";
 import { statusGroupOf } from "../types";
-import { FADE_MS, SIZE_MS } from "../hooks/use-row-transition";
+import { FADE_MS, SIZE_MS, beginCardClose, prefersReduced } from "../hooks/use-row-transition";
 import {
   ATTENTION_REASON_LABEL,
   attentionReasonOf,
@@ -130,7 +130,10 @@ function useTaskTransitions(tasks: TaskListItem[]): TaskTransitions {
     prevActiveRef.current = activeIds;
     if (previous) {
       const startedAt = Date.now();
-      for (const id of previous) {
+      // With motion reduced the hooks below animate nothing, so running the
+      // timeline anyway just held the Task in 진행 중 for 950ms and then
+      // dropped it — slower than no animation and just as abrupt.
+      for (const id of prefersReduced() ? [] : previous) {
         // Still present in the list, no longer active, not already moving —
         // a Task that was *deleted* simply goes, with nothing to animate.
         if (!activeIds.has(id) && !startedRef.current.has(id) && tasks.some((t) => t.id === id)) {
@@ -285,21 +288,44 @@ export function TaskList() {
   const listRef = useRef<HTMLDivElement>(null);
 
   /**
-   * How tall a 완료 row is, read off one that is already on screen.
+   * The compensation, done in the commit that inserts the arriving row and
+   * before the browser paints it.
    *
-   * The leaving card needs this number *before* the arriving row exists, so it
-   * can hand back exactly that much space at the instant the row appears (see
-   * `useCollapseOut`). Rows in this list are uniform, so any of them answers
-   * the question; the fallback covers the case where 완료 is empty and there is
-   * nothing to measure yet.
+   * The previous version measured "some row already on screen" into a ref and
+   * let the leaving card shrink itself on its own `setTimeout`. Both halves
+   * were wrong. The selector took the first Task row in DOM order, and since
+   * a running card carries no `data-flip-id` that was a 확인 필요 row whenever
+   * one existed — about 72px against the 완료 row's 52 — so the card handed
+   * back twenty pixels that were never taken. And the card's timer and the
+   * render that inserted the row were two independent clocks, so whichever
+   * landed first got a frame of the list at the wrong height.
+   *
+   * Here the row is measured *after* it exists and the card is shrunk before
+   * anything is drawn, so the insertion genuinely costs the list nothing.
    */
-  const rowHeightRef = useRef(52);
+  const compensatedRef = useRef<Set<string>>(new Set());
+  const enteringKey = Array.from(enteringIds).sort().join(",");
   useLayoutEffect(() => {
-    const measured = listRef.current
-      ?.querySelector<HTMLElement>('[data-flip-id^="task:"]')
-      ?.getBoundingClientRect().height;
-    if (measured && measured > 8) rowHeightRef.current = measured;
-  });
+    const root = listRef.current;
+    if (!root || prefersReduced()) return;
+
+    for (const id of enteringKey ? enteringKey.split(",") : []) {
+      if (compensatedRef.current.has(id)) continue;
+      compensatedRef.current.add(id);
+
+      const row = root.querySelector<HTMLElement>(`[data-row-id="${id}"]`);
+      const card = root.querySelector<HTMLElement>(`[data-card-id="${id}"]`);
+      // No card to take the space from — the destination section is filtered
+      // out of view, or the Task went straight there. Nothing to compensate.
+      if (!row || !card) continue;
+
+      beginCardClose(card, row.getBoundingClientRect().height);
+    }
+
+    for (const id of compensatedRef.current) {
+      if (!enteringIds.has(id)) compensatedRef.current.delete(id);
+    }
+  }, [enteringKey, enteringIds]);
 
   /**
    * Which sections a Task is drawn in.
@@ -535,7 +561,6 @@ export function TaskList() {
                         onStartClick={onStartClick}
                         starting={startingIds.has(t.id)}
                         leaving={settlingIds.has(t.id)}
-                        liftPx={rowHeightRef.current}
                       />
                     ) : (
                       <TaskRow

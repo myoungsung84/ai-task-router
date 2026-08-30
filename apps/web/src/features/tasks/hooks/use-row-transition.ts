@@ -23,7 +23,7 @@ import { useLayoutEffect, type RefObject } from "react";
 
 const REDUCED = "(prefers-reduced-motion: reduce)";
 
-function prefersReduced(): boolean {
+export function prefersReduced(): boolean {
   return typeof window !== "undefined" && !!window.matchMedia?.(REDUCED).matches;
 }
 
@@ -60,75 +60,64 @@ function contentsOf(el: HTMLElement): HTMLElement[] {
   );
 }
 
-/** Fade, then close the gap. Total ≈ 720ms; keep `SETTLE_MS` at or above it. */
-export function useCollapseOut(
-  ref: RefObject<HTMLElement | null>,
-  active: boolean,
-  /**
-   * The height the arriving 완료 row will occupy, handed back the instant it
-   * appears. See the note in phase two.
-   */
-  liftPx = 0,
-) {
+/**
+ * Closes a leaving card, giving back `liftPx` of its height in one invisible
+ * step first.
+ *
+ * Exported and idempotent because the caller that knows the right `liftPx` is
+ * the list, not the card: only the list is present in the commit that inserts
+ * the arriving row, and only there can the row be measured and the card
+ * shrunk before the browser paints either. `useCollapseOut` keeps a late
+ * fallback for the cases where no row ever arrives to trigger it — a filter
+ * that hides the destination section, a Task deleted mid-flight.
+ */
+export function beginCardClose(el: HTMLElement, liftPx: number) {
+  if (el.dataset.closing) return;
+  el.dataset.closing = "1";
+
+  const remaining = Math.max(0, el.getBoundingClientRect().height - liftPx);
+  el.style.transition = "none";
+  el.style.height = `${remaining}px`;
+  // Forces the browser to take the step above as a starting point rather than
+  // folding it into the transition that follows.
+  void el.offsetHeight;
+
+  el.style.transition = `height ${SIZE_MS}ms ${EASE_SIZE}, padding ${SIZE_MS}ms ${EASE_SIZE}`;
+  el.style.height = "0px";
+  el.style.paddingTop = "0px";
+  el.style.paddingBottom = "0px";
+  el.style.borderTopColor = "transparent";
+}
+
+/** Fade the contents; the close itself is triggered by the list. Total ≈ 620ms. */
+export function useCollapseOut(ref: RefObject<HTMLElement | null>, active: boolean) {
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || !active || prefersReduced()) return;
 
-    const height = el.getBoundingClientRect().height;
     el.style.overflow = "hidden";
-    el.style.height = `${height}px`;
+    el.style.height = `${el.getBoundingClientRect().height}px`;
 
-    // Phase one: it goes out where it stands. An earlier version drifted it
-    // downward and answered that with the row sliding in from above, on the
-    // theory that a shared direction would read as one movement. In practice
-    // the text visibly travelled, which is more distracting than the pop it
-    // replaced — the space closing and opening already carries the direction.
+    // It goes out where it stands. An earlier version drifted it downward and
+    // answered that with the row sliding in from above, on the theory that a
+    // shared direction would read as one movement. In practice the text
+    // visibly travelled, which is more distracting than the pop it replaced.
     el.style.transition = `opacity ${FADE_MS}ms ease`;
     el.style.opacity = "0";
 
-    // Phase two, once it is invisible: the space closes. Collapsing while it
-    // is still legible reads as the row being yanked downward.
-    //
-    // This is also the moment the arriving row starts growing — the list
-    // holds the Task in both places for exactly this window (see
-    // `useTaskTransitions`). Run in sequence instead, the rows below travelled
-    // 108px up and then 52px back down; overlapped, they make one move.
-    const closing = setTimeout(() => {
-      /*
-       * The arriving row appears at its full height on this same beat, and
-       * this is where its space comes from.
-       *
-       * Growing the row instead — the previous version — made it travel. The
-       * row sits below this card, so every pixel this card gives up pulls the
-       * row upward: measured, its frame climbed 108px over the 380ms it spent
-       * growing 52px, which is why the arrival read as awkward while the exit,
-       * which never moves, read as fine. Handing back exactly the row's height
-       * in one invisible step (the card's contents are already fully faded, so
-       * this box has nothing left to see) means the insertion costs the list
-       * nothing, and the only motion left is one uniform settle upward as the
-       * remainder closes.
-       */
-      const remaining = Math.max(0, height - liftPx);
-      el.style.transition = "none";
-      el.style.height = `${remaining}px`;
-      // Forces the browser to take the step above as a starting point rather
-      // than collapsing it into the transition that follows.
-      void el.offsetHeight;
-
-      el.style.transition = `height ${SIZE_MS}ms ${EASE_SIZE}, padding ${SIZE_MS}ms ${EASE_SIZE}`;
-      el.style.height = "0px";
-      el.style.paddingTop = "0px";
-      el.style.paddingBottom = "0px";
-      el.style.borderTopColor = "transparent";
-    }, FADE_MS);
+    // Late, and only if the list has not already closed this card with a
+    // measured lift. Sixty milliseconds of slack so the commit that inserts
+    // the row always gets there first when there is a row to insert.
+    const fallback = setTimeout(() => beginCardClose(el, 0), FADE_MS + 60);
 
     // Cancelling only the timer would leave the element stuck at whatever
     // opacity and height it had reached — invisible, or half-closed.
     return () => {
-      clearTimeout(closing);
+      clearTimeout(fallback);
+      delete el.dataset.closing;
       el.removeAttribute("style");
     };
-  }, [ref, active, liftPx]);
+  }, [ref, active]);
 }
 
 /**

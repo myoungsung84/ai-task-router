@@ -432,9 +432,9 @@ body {
 }
 .eq-bar {
   transform-origin: bottom;
-  /* 48 bars × 44ms of stagger ≈ this period, so the swell crosses the card
-     exactly once per cycle and the wrap has no visible seam. */
-  animation: eq-rise 2.1s ease-in-out infinite;
+  /* Paired with the -90ms per-bar stagger set in `ActivityEqualizer`: three
+     full phases across 60 bars, so the row always has several crests in it. */
+  animation: eq-rise 1.8s ease-in-out infinite;
 }
 
 /* The 3px rail down the left edge of a live card, with a light running down

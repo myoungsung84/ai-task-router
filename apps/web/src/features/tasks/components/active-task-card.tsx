@@ -47,7 +47,6 @@ export function ActiveTaskCard({
   onStartClick,
   starting = false,
   leaving = false,
-  liftPx = 0,
 }: {
   task: TaskListItem;
   onCancelClick: (task: TaskListItem) => void;
@@ -61,8 +60,6 @@ export function ActiveTaskCard({
    * left and closes the gap it occupied.
    */
   leaving?: boolean;
-  /** Height the arriving 완료 row will take, handed back as it appears. */
-  liftPx?: number;
 }) {
   // Same live subscription the row had — the card only changes how it is
   // drawn, not where its data comes from.
@@ -70,7 +67,7 @@ export function ActiveTaskCard({
   const task = live ?? listTask;
 
   const rootRef = useRef<HTMLDivElement>(null);
-  useCollapseOut(rootRef, leaving, liftPx);
+  useCollapseOut(rootRef, leaving);
 
   const isQueued = task.status === "QUEUED";
   // Executing, as opposed to sitting in the queue. Drives both the 1s tick and
@@ -96,6 +93,9 @@ export function ActiveTaskCard({
   return (
     <div
       ref={rootRef}
+      // The list finds this card by id in the commit that inserts the matching
+      // 완료 row, so it can shrink this one by exactly that row's height.
+      data-card-id={task.id}
       className={cn(
         "group relative flex items-start gap-4 px-4 py-4 transition-colors duration-fast hover:bg-fg/[0.03]",
       )}

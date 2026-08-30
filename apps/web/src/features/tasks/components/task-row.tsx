@@ -195,9 +195,13 @@ function RowShell({
   return (
     <div
       ref={rootRef}
-      // Withheld while entering: this row is mid-transition, and FLIP putting a
-      // transform on it would fight the motion it is already playing.
-      data-flip-id={entering ? undefined : `task:${task.id}`}
+      data-row-id={task.id}
+      // Always present, including while entering. It was withheld at first on
+      // the grounds that FLIP would fight the row's own motion — true when the
+      // row animated its height, and false now that it only fades. Excluding
+      // it meant that when the section headings disappeared at the end of a
+      // handoff, every other row eased 56px upward while this one teleported.
+      data-flip-id={`task:${task.id}`}
       className={cn(ROW_BASE, "py-4", className)}
     >
       {/* The row's frame: present from the first frame of an arrival and never
