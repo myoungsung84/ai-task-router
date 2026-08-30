@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import Link from "next/link";
 import { Trash2 } from "lucide-react";
 import { cn, formatDuration, projectName } from "@/lib/format";
@@ -9,6 +9,7 @@ import { AgentAvatar } from "@/components/agent-icon";
 import { Badge, type Tone } from "@/components/badge";
 import { TaskStatusBadge } from "./task-status-badge";
 import { JobIdTag } from "./job-id-tag";
+import { useRevealIn } from "../hooks/use-row-transition";
 import {
   AGENT_LABEL,
   ATTENTION_REASON_LABEL,
@@ -173,11 +174,16 @@ function RowShell({
   task,
   actions,
   className,
+  entering = false,
 }: {
   task: TaskListItem;
   actions: ReactNode;
   className?: string;
+  entering?: boolean;
 }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  useRevealIn(rootRef, entering);
+
   const result = resultLine(task);
   const attentionReason = attentionReasonOf(task);
   const agents = Array.from(new Set(task.workflow.steps.map((s) => s.agent)));
@@ -187,9 +193,19 @@ function RowShell({
   // cramped. The rows had not grown; their contents had. 완료 rows carry the
   // title alone and settle back to one line on the same padding.
   return (
-    <div className={cn(ROW_BASE, "py-4", className)}>
+    <div
+      ref={rootRef}
+      // Withheld while entering: this row is mid-transition, and FLIP putting a
+      // transform on it would fight the motion it is already playing.
+      data-flip-id={entering ? undefined : `task:${task.id}`}
+      className={cn(ROW_BASE, "py-4", className)}
+    >
+      {/* The row's frame: present from the first frame of an arrival and never
+          faded with the contents, so the row grows in as a visible object
+          rather than as an empty gap that fills afterwards. */}
       <span
         aria-hidden
+        data-row-frame=""
         className={cn("absolute inset-y-0 left-0 w-[3px]", STATUS_RAIL[task.status])}
       />
       <div className={COL.status}>
@@ -273,13 +289,22 @@ function RowShell({
 export function TaskRow({
   task,
   onDeleteClick,
+  entering = false,
 }: {
   task: TaskListItem;
   onDeleteClick: (task: TaskListItem) => void;
+  /**
+   * This row is the Task that just finished, arriving from 진행 중 above. It
+   * opens its space first and only then fades in — the mirror of the card's
+   * exit, which fades before it closes. Doing both at once in either direction
+   * reads as the list being shoved rather than making room.
+   */
+  entering?: boolean;
 }) {
   return (
     <RowShell
       task={task}
+      entering={entering}
       actions={
         <IconButton
           label={`${task.jobId} 삭제`}

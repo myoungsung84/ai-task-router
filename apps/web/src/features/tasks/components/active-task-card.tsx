@@ -5,13 +5,15 @@ import { CircleStop, Play } from "lucide-react";
 import { IconButton } from "@/components/button";
 import { AgentMark } from "@/features/agents/components/agent-character";
 import { deriveAgentPresence } from "@/features/agents/agent-activity";
-import { formatDuration, projectName } from "@/lib/format";
+import { cn, formatDuration, projectName } from "@/lib/format";
+import { useRef } from "react";
 import { useTask } from "../hooks/use-task";
+import { useCollapseOut } from "../hooks/use-row-transition";
 import { useNowTick } from "../hooks/use-now-tick";
-import { ActivityTrace } from "./activity-trace";
+import { ActivityEqualizer, StallBadge } from "./activity-trace";
 import { JobIdTag } from "./job-id-tag";
 import { StepTrack } from "./step-track";
-import { pickLogLine } from "../lib/pick-log-line";
+import { pickLogLineOrSystem } from "../lib/pick-log-line";
 import type { TaskListItem, WorkflowStep } from "../types";
 
 /**
@@ -44,20 +46,38 @@ export function ActiveTaskCard({
   onCancelClick,
   onStartClick,
   starting = false,
+  leaving = false,
+  liftPx = 0,
 }: {
   task: TaskListItem;
   onCancelClick: (task: TaskListItem) => void;
   onStartClick?: (task: TaskListItem) => void;
   starting?: boolean;
+  /**
+   * The Task has finished and the list is holding it here just long enough to
+   * play its exit (see `useTaskTransitions`). Everything live about the card —
+   * equalizer, rail light, the character's motion — is already off by this
+   * point, because the status it reads is terminal; this only fades what is
+   * left and closes the gap it occupied.
+   */
+  leaving?: boolean;
+  /** Height the arriving 완료 row will take, handed back as it appears. */
+  liftPx?: number;
 }) {
   // Same live subscription the row had — the card only changes how it is
   // drawn, not where its data comes from.
   const { task: live } = useTask(listTask.id);
   const task = live ?? listTask;
 
+  const rootRef = useRef<HTMLDivElement>(null);
+  useCollapseOut(rootRef, leaving, liftPx);
+
   const isQueued = task.status === "QUEUED";
-  const cancellable = task.status === "RUNNING" || task.status === "REVIEWING" || isQueued;
-  useNowTick(task.status === "RUNNING" || task.status === "REVIEWING");
+  // Executing, as opposed to sitting in the queue. Drives both the 1s tick and
+  // the background wash, so a card can never be washed without also ticking.
+  const isLive = task.status === "RUNNING" || task.status === "REVIEWING";
+  const cancellable = isLive || isQueued;
+  useNowTick(isLive);
 
   const steps = task.workflow?.steps ?? [];
   const step = currentStep(steps);
@@ -68,16 +88,52 @@ export function ActiveTaskCard({
     ? (deriveAgentPresence([task], [step.agent])[0]?.activity ?? "idle")
     : "idle";
 
-  // Prefers the agent's own words over its shell plumbing — see pickLogLine.
-  const recentLog = live ? pickLogLine(live.logs) : null;
+  // Prefers the agent's own words over its shell plumbing, and falls back to
+  // the router's own line while a buffering agent has said nothing at all —
+  // which, for Claude, is almost the whole run. See pickLogLineOrSystem.
+  const recentLog = live ? pickLogLineOrSystem(live.logs) : null;
 
   return (
-    <div className="group relative flex items-start gap-4 px-4 py-4 transition-colors duration-fast hover:bg-fg/[0.03]">
-      <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] bg-brand" />
+    <div
+      ref={rootRef}
+      className={cn(
+        "group relative flex items-start gap-4 px-4 py-4 transition-colors duration-fast hover:bg-fg/[0.03]",
+      )}
+    >
+      {/* The rail, with current running through it while the Task executes. */}
+      <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] overflow-hidden bg-brand">
+        {isLive ? (
+          <span className="rail-run absolute inset-x-0 h-1/3 bg-gradient-to-b from-transparent via-white/80 to-transparent" />
+        ) : null}
+      </span>
 
-      <AgentMark agent={step?.agent ?? "claude"} activity={activity} size={48} className="mt-0.5" />
+      {/*
+        The card's own equalizer, filling it rather than sitting in a corner of
+        it. A gradient wash lived here first and carried no information at all;
+        this draws the Task's actual log arrival, and only invents a rhythm in
+        the one state where there is provably nothing to draw (see
+        `ActivityEqualizer`). Below the content (`z-0` here, `z-10` on
+        everything that carries text) and clipped by the card, so it can never
+        take a label down with it or bleed into the rows stacked either side.
+      */}
+      {live && !isQueued ? (
+        <span className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+          {/* Mounted for as long as the card is, not only while it runs: the
+              equalizer fades itself out when `running` goes false, and
+              unmounting it here would take that fade away and end the run by
+              switching the colour off. */}
+          <ActivityEqualizer logs={live.logs} agent={step?.agent ?? "claude"} running={isLive} />
+        </span>
+      ) : null}
 
-      <div className="min-w-0 flex-1 space-y-2">
+      <AgentMark
+        agent={step?.agent ?? "claude"}
+        activity={activity}
+        size={48}
+        className="z-10 mt-0.5"
+      />
+
+      <div className="relative z-10 min-w-0 flex-1 space-y-2">
         {/* Job ID leads the card — it is the handle used to refer to this Task
             everywhere else (chat, MCP, the URL), so it is findable before the
             title rather than buried in the metadata line under it. */}
@@ -115,12 +171,17 @@ export function ActiveTaskCard({
               <span className="shrink-0 text-fg-faint" aria-hidden>
                 ·
               </span>
-              <span className="min-w-0 flex-1 truncate text-fg-secondary">{recentLog}</span>
+              {/* Smaller than the project name beside it, and truncated: this
+                  is the noisiest thing on the card and the one most likely to
+                  arrive as a 200-character command line. */}
+              <span className="min-w-0 flex-1 truncate text-[11px] leading-tight text-fg-secondary">
+                {recentLog}
+              </span>
             </>
           ) : (
             <span className="flex-1" />
           )}
-          {live && !isQueued ? <ActivityTrace logs={live.logs} className="shrink-0" /> : null}
+          {live && !isQueued ? <StallBadge logs={live.logs} /> : null}
         </div>
       </div>
 

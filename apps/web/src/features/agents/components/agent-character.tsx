@@ -40,12 +40,21 @@ const RING_CLASS: Record<AgentActivity, string | null> = {
   error: "border-danger/70",
 };
 
-/** Motion applied to the mark itself, layered under the ring's own animation. */
+/**
+ * Motion applied to the mark itself, layered under the ring's own animation.
+ *
+ * Every activity has one. `researching` and `reviewing` used to be null on the
+ * theory that their orbit ring was motion enough — but an analyze-only Task
+ * (and a review-only one) never passes through `writing`, so those runs showed
+ * a completely still glyph from start to finish and read as a frozen screen.
+ * They now scan horizontally, which stays distinct from `writing`'s vertical
+ * bob at a glance.
+ */
 const MARK_MOTION: Record<AgentActivity, string | null> = {
   idle: "agent-breathe",
-  researching: null,
+  researching: "agent-scan",
   writing: "agent-bob",
-  reviewing: null,
+  reviewing: "agent-scan-slow",
   error: "agent-flinch",
 };
 

@@ -137,3 +137,34 @@ const MAX = 140;
 function truncate(text: string): string {
   return text.length <= MAX ? text : text.slice(0, MAX - 1).trimEnd() + "…";
 }
+
+/**
+ * `pickLogLine`, falling back to the router's own newest line when the agent
+ * has not said anything yet.
+ *
+ * Claude buffers its entire run — measured on T-26, a 249.5s analyze delivered
+ * all 69 of its lines on one timestamp at 248.7s — so `pickLogLine`, which
+ * skips `system` entries by design, returns null for essentially the whole
+ * life of a Claude Task and the card's status line sat empty.
+ *
+ * The router's own commentary ("Claude 분석 시작.") is a weaker line: it is
+ * true, but it does not change while the agent works. It is still better than
+ * a blank, and it is real — the alternative of rotating invented phrases would
+ * be the UI claiming activity it cannot observe, which is the thing this whole
+ * screen refuses to do. The honest fix lives in the runner, not here: an agent
+ * invoked so that it streams would give this function something to say.
+ */
+export function pickLogLineOrSystem(logs: LogEntry[]): string | null {
+  const agentLine = pickLogLine(logs);
+  if (agentLine) return agentLine;
+
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const log = logs[i]!;
+    if (log.source !== "system") continue;
+    const text = tidyLogText(log.text);
+    if (!text || IGNORABLE.some((re) => re.test(text))) continue;
+    return truncate(text);
+  }
+
+  return null;
+}

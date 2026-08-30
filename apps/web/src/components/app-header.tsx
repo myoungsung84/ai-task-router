@@ -7,6 +7,7 @@ import { Plus, Settings2 } from "lucide-react";
 import { NewTaskModal } from "@/features/tasks/components/new-task-modal";
 import { ControlTower } from "@/features/agents/components/control-tower";
 import { BrandMark } from "@/components/brand-mark";
+import { HeaderClock } from "@/components/header-clock";
 import { Button } from "@/components/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { cn } from "@/lib/format";
@@ -37,6 +38,10 @@ export function AppHeader() {
           AI Task Router
         </Link>
         <div className="flex items-center gap-1">
+          {/* Quiet end of the cluster: the clock states a fact and is never
+              clicked, so it sits before the controls rather than among them. */}
+          <HeaderClock />
+          <span aria-hidden className="mx-2 hidden h-4 w-px bg-border sm:block" />
           <ThemeToggle />
           <Link
             href="/settings"

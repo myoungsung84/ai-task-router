@@ -76,14 +76,31 @@ function buildMilestones(task: Pick<Task, "startedAt" | "workflow">): Milestone[
   ];
 }
 
+/**
+ * A completed stretch is tinted by whoever walked it, so the rail says which
+ * Agent owned which part of the route without a legend. Neutral grey did the
+ * job when the card behind it was empty; over the equalizer it read as a
+ * generic progress bar laid across the card.
+ */
+const AGENT_SEGMENT: Record<AgentName, string> = {
+  claude: "bg-[rgb(var(--agent-claude)/0.5)]",
+  codex: "bg-[rgb(var(--agent-codex)/0.5)]",
+};
+
+/** The moving light on the running segment, in that Agent's colour. */
+const AGENT_SWEEP: Record<AgentName, string> = {
+  claude: "via-agent-claude/70",
+  codex: "via-agent-codex/70",
+};
+
 /** The segment leading *into* a node — filled when the previous stage is behind us. */
-function segmentClass(prev: NodeState, next: NodeState): string {
+function segmentClass(prev: NodeState, next: NodeState, agent: AgentName | null): string {
   if (next === "failed") return "bg-danger/70";
-  if (next === "running") return "bg-fg/12";
+  if (next === "running") return "bg-fg/10";
   if (next === "skipped") {
     return "bg-fg/10 [background-image:repeating-linear-gradient(135deg,transparent_0_3px,rgb(var(--fg)/0.16)_3px_6px)]";
   }
-  if (next === "done") return "bg-fg/30";
+  if (next === "done") return agent ? AGENT_SEGMENT[agent] : "bg-fg/30";
   // Not reached yet.
   return prev === "pending" ? "bg-fg/[0.08]" : "bg-fg/[0.08]";
 }
@@ -241,13 +258,16 @@ export function StepTrack({
                 <span
                   className={cn(
                     "h-[3px] min-w-0 flex-1 overflow-hidden rounded-full",
-                    segmentClass(milestones[i - 1]!.state, m.state),
+                    segmentClass(milestones[i - 1]!.state, m.state, m.step?.agent ?? null),
                   )}
                 >
                   {m.state === "running" ? (
                     <span
                       aria-hidden
-                      className="scan-sweep block h-full w-1/2 bg-gradient-to-r from-transparent via-white/50 to-transparent"
+                      className={cn(
+                        "scan-sweep block h-full w-1/2 bg-gradient-to-r from-transparent to-transparent",
+                        AGENT_SWEEP[m.step?.agent ?? "claude"],
+                      )}
                     />
                   ) : null}
                 </span>

@@ -370,6 +370,90 @@ body {
   animation: agent-breathe 4s ease-in-out infinite;
 }
 
+/* researching / reviewing — the mark itself sweeping side to side, under the
+   orbit ring that already turns around it. These two activities previously had
+   no mark motion at all (only `writing` did), so an analyze- or review-only
+   Task — which never enters `writing` — showed a still glyph for its whole
+   run and read as frozen.
+   Horizontal on purpose: `agent-bob` is vertical and belongs to "typing", and
+   a shared axis would make the two states rhyme when they mean different work.
+   The ring is a separate element, so this never drags it out of round. */
+@keyframes agent-scan {
+  0%,
+  100% {
+    transform: translateX(-3px) rotate(-3deg);
+  }
+  50% {
+    transform: translateX(3px) rotate(3deg);
+  }
+}
+.agent-scan {
+  animation: agent-scan 2.4s ease-in-out infinite;
+}
+/* Reviewing is the slower of the two, matching `agent-orbit-slow` above:
+   "checking over" should not look busier than "looking things up". */
+.agent-scan-slow {
+  animation: agent-scan 4s ease-in-out infinite;
+}
+
+/* The equalizer across the back of a running card, while the agent has
+   produced no output to draw.
+
+   Two earlier attempts failed for the same reason. A 78px seismograph in the
+   card's corner, and then the same bars animated, both read as a small part
+   bolted onto the card — the size was the problem, not the motion. A gradient
+   wash behind the card was big enough but carried no information at all.
+
+   This one is the card's whole width, and the bars are the trace's own bars,
+   so the only difference between "waiting" and "working" is where the heights
+   come from. Each bar starts its cycle after the one to its left, which is
+   what makes the row swell left to right rather than pulse as a block.
+
+   `scaleY` and `opacity` only: this animates 48 elements continuously behind
+   live text, and anything touching layout would repaint the card every frame. */
+/*
+ * The card's exit and the 완료 row's entrance used to live here as keyframes
+ * animating `max-height` between 0 and a guessed ceiling. They now live in
+ * `features/tasks/hooks/use-row-transition.ts`, which measures the element
+ * first — a stylesheet cannot know that a card is 108px tall, and animating
+ * 220px → 0 put the whole easing curve on a range the content never occupied.
+ */
+
+@keyframes eq-rise {
+  0%,
+  100% {
+    transform: scaleY(0.12);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+.eq-bar {
+  transform-origin: bottom;
+  /* 48 bars × 44ms of stagger ≈ this period, so the swell crosses the card
+     exactly once per cycle and the wrap has no visible seam. */
+  animation: eq-rise 2.1s ease-in-out infinite;
+}
+
+/* The 3px rail down the left edge of a live card, with a light running down
+   it. The rail already marked the active card; a static bar of brand colour
+   is a label, and a bar with something moving through it is a wire with
+   current in it. Vertical travel so it never competes with the card's own
+   left-to-right wash. */
+@keyframes rail-run {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(300%);
+  }
+}
+.rail-run {
+  animation: rail-run 2.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .typing-dot,
   .scan-sweep,
@@ -378,7 +462,11 @@ body {
   .agent-orbit,
   .agent-orbit-slow,
   .agent-flinch,
-  .agent-breathe {
+  .agent-breathe,
+  .agent-scan,
+  .agent-scan-slow,
+  .eq-bar,
+  .rail-run {
     animation: none !important;
   }
 }
