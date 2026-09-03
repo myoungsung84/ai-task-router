@@ -26,6 +26,7 @@ export function AgentStrip({
   agents,
   className,
   label = "AI 팀",
+  columns,
   /** Right-hand slot for a caller's own summary (e.g. a running count). */
   action,
 }: {
@@ -33,6 +34,8 @@ export function AgentStrip({
   agents?: AgentName[];
   className?: string;
   label?: string;
+  /** See `AgentPresenceRow` — the caller declares its own width, not a breakpoint. */
+  columns?: 1 | 2;
   action?: React.ReactNode;
 }) {
   const router = useRouter();
@@ -49,6 +52,7 @@ export function AgentStrip({
       </div>
       <AgentPresenceRow
         presence={presence}
+        columns={columns}
         onSelect={(taskId) => router.push(`/tasks/${taskId}`)}
       />
     </section>
@@ -63,21 +67,33 @@ export function AgentStrip({
  * the second one's "지금 뭐 하는 중" line starts at a predictable x position;
  * with flex, a long Task title on the left would shove the right-hand
  * character around on every poll.
+ *
+ * **The caller declares the column count, because only the caller knows how
+ * wide it is.** This was `sm:grid-cols-2`, and a Tailwind breakpoint measures
+ * the *viewport* — so on any desktop it put two characters side by side even
+ * inside the Task detail sidebar, leaving each about 145px. A character needs
+ * roughly 62px of that for its badge and padding, and what was left could not
+ * hold "Claude 대기 중": Korean breaks between syllables, so the label came
+ * out as 대/기/중 stacked vertically. Two columns is a statement about the
+ * container, and the container is the one thing a breakpoint cannot see.
  */
 export function AgentPresenceRow({
   presence,
   onSelect,
   className,
+  /** 1 unless the caller has the width for two. Never widened automatically. */
+  columns = 1,
 }: {
   presence: AgentPresence[];
   onSelect?: (taskId: string) => void;
   className?: string;
+  columns?: 1 | 2;
 }) {
   return (
     <div
       className={cn(
         "grid gap-2 rounded-lg bg-fg/[0.035] p-2",
-        presence.length > 1 ? "sm:grid-cols-2" : "grid-cols-1",
+        columns === 2 && presence.length > 1 ? "sm:grid-cols-2" : "grid-cols-1",
         className,
       )}
     >

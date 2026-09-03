@@ -153,20 +153,33 @@ export function AgentCharacter({
       <span className="text-fg-secondary">{focus.title}</span>
     </span>
   ) : (
-    <span className="text-fg-faint">할당된 작업 없음</span>
+    <span className="truncate text-fg-faint">할당된 작업 없음</span>
   );
 
   const body = (
     <>
       <AgentMark agent={agent} activity={activity} />
       <span className="flex min-w-0 flex-col items-start gap-0.5">
-        <span className="flex items-center gap-1.5">
-          <span className="text-sm font-medium text-fg">{AGENT_LABEL[agent]}</span>
-          <span className={cn("text-xs", activity === "error" ? "text-danger" : "text-fg-muted")}>
+        {/*
+          `min-w-0` on the row and `truncate` on the two labels so a container
+          narrower than the text loses the *end* of a word rather than breaking
+          it. Korean has no unbreakable-token protection the way "Claude" does:
+          without this, "대기 중" wraps to one syllable per line and the card
+          grows three lines tall instead of clipping.
+        */}
+        <span className="flex min-w-0 max-w-full items-center gap-1.5">
+          <span className="truncate text-sm font-medium text-fg">{AGENT_LABEL[agent]}</span>
+          <span
+            className={cn(
+              "truncate text-xs",
+              activity === "error" ? "text-danger" : "text-fg-muted",
+            )}
+          >
             {ACTIVITY_LABEL[activity]}
           </span>
-          {activity === "writing" ? <TypingDots className="text-brand" /> : null}
-          {extra > 0 ? <span className="mono text-xs text-fg-faint">+{extra}</span> : null}
+          {/* Both are short and both are signal — they give up no width. */}
+          {activity === "writing" ? <TypingDots className="shrink-0 text-brand" /> : null}
+          {extra > 0 ? <span className="mono shrink-0 text-xs text-fg-faint">+{extra}</span> : null}
         </span>
         <span className="flex w-full min-w-0 text-xs">{detail}</span>
       </span>

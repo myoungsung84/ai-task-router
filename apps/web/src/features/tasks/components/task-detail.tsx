@@ -296,6 +296,10 @@ export function TaskDetail({ id }: { id: string }) {
     try {
       await tasksApi.cancel(id);
       showToast("success", "작업을 중단했습니다.");
+      // Same reason as onResolveWarning, one cadence faster: the Task was live
+      // when it was cancelled, so the list would catch up within 2s anyway.
+      // Refreshed all the same — an action taken here should land there.
+      void refreshTasks();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setActionError(message);
@@ -310,6 +314,10 @@ export function TaskDetail({ id }: { id: string }) {
     setActionError(null);
     try {
       await tasksApi.start(id);
+      // QUEUED → RUNNING. The list is already on the fast cadence here, but
+      // the AI team strip is drawn from the same list, so refreshing puts the
+      // character to work in the same beat as the button press.
+      void refreshTasks();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -339,6 +347,12 @@ export function TaskDetail({ id }: { id: string }) {
       await tasksApi.resolveWarning(id);
       showToast("success", "검토 결과를 확인하고 완료 처리했습니다.");
       setConfirmingResolve(false);
+      // This screen is live (SSE) but the list is polled, and WARNING → READY
+      // moves between two statuses the poller counts as settled — so it is on
+      // the 10s idle cadence, not the 2s active one. Without this the row on
+      // the dashboard keeps saying 확인 필요 for up to ten seconds after the
+      // toast says otherwise, which reads as the list being broken.
+      void refreshTasks();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setActionError(message);
