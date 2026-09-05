@@ -53,7 +53,13 @@ taskRouter.get("/:id", (req, res) => {
 // instruction and workflow define what actually ran, and letting a PATCH edit
 // those would make the stored record disagree with the run it describes.
 taskRouter.patch("/:id", (req, res) => {
-  const title: unknown = (req.body ?? {}).title;
+  // Narrowed before the property is reached, not after. Annotating the result
+  // `unknown` still left the *access* happening on Express's `any`-typed body,
+  // which is the part that is actually unchecked: a non-object body would have
+  // thrown here rather than answering 400.
+  const body: unknown = req.body;
+  const title =
+    typeof body === "object" && body !== null ? (body as Record<string, unknown>).title : undefined;
   if (typeof title !== "string") {
     res.status(400).json({ error: "title은 문자열이어야 합니다." });
     return;
