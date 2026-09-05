@@ -46,6 +46,32 @@ function sinceLabel(iso: string | null): string | null {
   return `${Math.floor(hours / 24)}일 전`;
 }
 
+/**
+ * The tower's own footprint, before the first poll answers.
+ *
+ * Mirrors the real row's height (`h-10`) and its responsive columns, so the
+ * header is the same size empty as it is full and nothing below it moves when
+ * the data lands. Deliberately in the idle colours rather than the live ones:
+ * a workspace is far more often quiet than busy, so the quiet frame is the one
+ * least likely to flash a colour it then has to take back.
+ */
+function TowerSkeleton() {
+  const block = "h-2.5 rounded-sm bg-fg/[0.09]";
+  return (
+    <div className="border-b border-border bg-fg/[0.015]">
+      <div className="mx-auto w-full max-w-content px-4 sm:px-6">
+        <div className="flex h-10 items-center gap-3 motion-safe:animate-pulse" aria-hidden>
+          <span className="h-2 w-2 shrink-0 rounded-full bg-fg/[0.12]" />
+          <span className={cn(block, "w-16 shrink-0")} />
+          <span className={cn(block, "hidden w-24 shrink-0 sm:block")} />
+          <span className={cn(block, "hidden w-14 shrink-0 md:block")} />
+          <span className={cn(block, "ml-auto w-16 shrink-0")} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ControlTower() {
   const { tasks, loading } = useTaskList();
 
@@ -80,9 +106,12 @@ export function ControlTower() {
   // Keeps the elapsed readouts moving while something is genuinely running.
   useNowTick(live);
 
-  // Nothing is known yet — an empty tower is better than one asserting "대기 중"
-  // about a workspace it has not loaded.
-  if (loading && tasks.length === 0) return null;
+  // Nothing is known yet. The tower still must not assert "대기 중" about a
+  // workspace it has not loaded — but it also must not vanish, because it is
+  // part of the sticky header and rendering nothing made the whole page jump
+  // down the moment the first poll returned. So it holds its exact height and
+  // says nothing, in placeholder grey, until it has something true to say.
+  if (loading && tasks.length === 0) return <TowerSkeleton />;
 
   return (
     <div

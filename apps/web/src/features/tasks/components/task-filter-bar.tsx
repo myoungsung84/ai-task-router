@@ -39,6 +39,37 @@ export function defaultFilters(): TaskFilters {
   return { status: "all", search: "", project: "", range: resolvePreset(DEFAULT_RANGE) };
 }
 
+/**
+ * The filter row's footprint before the first Task list arrives.
+ *
+ * The bar is mounted only once the workspace is known to hold Tasks, so on a
+ * cold load it was absent for a beat and then pushed the whole list down as it
+ * appeared — the same vertical bounce the note above says this row was
+ * restructured to stop causing, just at load instead of on filter change.
+ *
+ * Every control in the real bar is `h-9`, and the wrapper's `flex-col` /
+ * `lg:flex-row` switch is repeated verbatim, so the placeholder is the same
+ * height as the real thing at every breakpoint rather than only on desktop.
+ */
+export function TaskFilterBarSkeleton({ className }: { className?: string }) {
+  return (
+    <div
+      aria-hidden
+      className={cn(
+        "flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between",
+        className,
+      )}
+    >
+      <span className="h-9 w-64 rounded-full bg-fg/[0.05]" />
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="h-9 w-full rounded-md bg-fg/[0.04] sm:w-56" />
+        <span className="h-9 w-32 rounded-md bg-fg/[0.04]" />
+        <span className="h-9 w-32 rounded-md bg-fg/[0.04]" />
+      </div>
+    </div>
+  );
+}
+
 export function TaskFilterBar({
   filters,
   onChange,

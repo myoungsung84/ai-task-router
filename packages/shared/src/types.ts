@@ -617,3 +617,49 @@ export interface DailySummary {
   /** Deterministic (non-AI) Korean sentence summarizing the above — see `daily-summary-service.ts`. */
   narrativeSummary: string;
 }
+
+/**
+ * One rate-limit window as the CLIs report it (Claude's 5-hour/7-day pair,
+ * Codex's `primary`/`secondary`). `usedPercent` is only meaningful while the
+ * window is still open: both CLIs report a percentage alongside the moment the
+ * window rolls over, and a snapshot read after that moment describes a window
+ * that no longer exists. `expired` marks exactly that case so the UI can show
+ * a rolled-over window as 0% rather than as a stale high-water mark.
+ */
+export interface UsageWindow {
+  usedPercent: number;
+  /** ISO 8601, or null when the CLI reported no reset time. */
+  resetsAt: string | null;
+  /** `resetsAt` is in the past — the window has already rolled over. */
+  expired: boolean;
+}
+
+/** Who the CLI is logged in as. Never carries a token — see `usage-service.ts`. */
+export interface UsageAccount {
+  email: string | null;
+  /** Human-readable plan ("Max 5x", "Plus"), already normalized by the server. */
+  plan: string | null;
+  organization: string | null;
+}
+
+export interface AgentUsage {
+  agent: AgentName;
+  account: UsageAccount | null;
+  fiveHour: UsageWindow | null;
+  sevenDay: UsageWindow | null;
+  /** Tokens this agent used today (Asia/Seoul), or null when it cannot be read. */
+  todayTokens: number | null;
+  /**
+   * ISO 8601 — when these numbers were actually observed, which is *not* "now".
+   * Both CLIs only record their limits while they run, so a snapshot can be
+   * hours old; the dashboard states this rather than implying it is live.
+   */
+  observedAt: string | null;
+  /** Korean reason the agent could not be read at all; null when it could. */
+  unavailable: string | null;
+}
+
+export interface UsageSnapshot {
+  claude: AgentUsage;
+  codex: AgentUsage;
+}

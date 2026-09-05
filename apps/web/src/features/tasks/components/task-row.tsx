@@ -43,8 +43,18 @@ const COL = {
   actions: "w-[4.5rem] shrink-0",
 };
 
-const ROW_BASE =
-  "group relative flex cursor-pointer items-center gap-4 px-4 transition-colors duration-fast hover:bg-fg/[0.03]";
+/**
+ * The row's geometry alone — no interaction, no hover.
+ *
+ * Split out from `ROW_BASE` so the loading placeholder can be laid out by the
+ * exact same rule as a real row without inheriting `cursor-pointer` and the
+ * hover tint. Overriding those on the placeholder instead would have meant
+ * betting on which of two same-specificity utilities Tailwind emits last, which
+ * is the trap `states.tsx` documents.
+ */
+const ROW_LAYOUT = "relative flex items-center gap-4 px-4";
+
+const ROW_BASE = `group ${ROW_LAYOUT} cursor-pointer transition-colors duration-fast hover:bg-fg/[0.03]`;
 
 /**
  * A 3px status flag down the row's left edge, the same device the running card
@@ -151,6 +161,45 @@ export function TaskListHeader() {
       <div className={COL.project}>프로젝트</div>
       <div className={COL.time}>시간</div>
       <div className={COL.actions} aria-hidden />
+    </div>
+  );
+}
+
+/**
+ * One row's silhouette, drawn while the list is still loading.
+ *
+ * It reuses `ROW_LAYOUT`, `COL` and the same `py-4` the real row uses, so its
+ * column positions and its height are the real ones rather than numbers copied
+ * by hand that drift the first time a column width changes. The height works
+ * out to the real 완료 row's exactly: `Badge` is `h-5` and `text-sm` sets a 20px
+ * line box, so a 20px block between 16px paddings is the same 52px.
+ *
+ * It draws the one-line 완료 shape rather than the taller 진행 중 card, because a
+ * placeholder should be shorter than what replaces it. Guessing tall would make
+ * the list *shrink* on arrival, which is the same jolt this is here to remove,
+ * only upward.
+ */
+export function TaskRowSkeleton() {
+  const block = "block h-5 rounded-full bg-fg/[0.07]";
+  return (
+    <div className={cn(ROW_LAYOUT, "py-4")} aria-hidden>
+      <span className="absolute inset-y-0 left-0 w-[3px] bg-fg/[0.07]" />
+      <div className={COL.status}>
+        <span className={cn(block, "w-16")} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <span className={cn(block, "w-1/2 max-w-[18rem]")} />
+      </div>
+      <div className={COL.agents}>
+        <span className={cn(block, "w-20")} />
+      </div>
+      <div className={COL.project}>
+        <span className={cn(block, "w-24")} />
+      </div>
+      <div className={COL.time}>
+        <span className={cn(block, "ml-auto w-8")} />
+      </div>
+      <div className={COL.actions} />
     </div>
   );
 }

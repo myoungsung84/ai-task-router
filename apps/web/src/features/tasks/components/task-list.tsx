@@ -7,13 +7,18 @@ import { useSearchParams } from "next/navigation";
 import { useTaskList } from "../hooks/use-task-list";
 import { tasksApi } from "../api/tasks-api";
 import type { MainFilter } from "./status-filter";
-import { TaskFilterBar, defaultFilters, type TaskFilters } from "./task-filter-bar";
-import { TaskListHeader, TaskRow } from "./task-row";
+import {
+  TaskFilterBar,
+  TaskFilterBarSkeleton,
+  defaultFilters,
+  type TaskFilters,
+} from "./task-filter-bar";
+import { TaskListHeader, TaskRow, TaskRowSkeleton } from "./task-row";
 import { ActiveTaskCard } from "./active-task-card";
 import { NewTaskModal } from "./new-task-modal";
 import { Button } from "@/components/button";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { EmptyState, ErrorState, LoadingState } from "@/components/states";
+import { EmptyState, ErrorState } from "@/components/states";
 import { useToast } from "@/components/toast";
 import { projectName } from "@/lib/format";
 import { describeRange, isWithinRange } from "../date-range";
@@ -25,6 +30,60 @@ import {
   type AttentionReason,
 } from "../workflow-labels";
 import type { TaskListItem } from "../types";
+
+/**
+ * How many placeholder rows the loading list draws.
+ *
+ * A centred spinner used to sit here, and it was the wrong shape: it occupied
+ * about two rows' worth of height and then the real table replaced it, so the
+ * column header and the first rows landed somewhere other than where the
+ * spinner had been. Drawing the actual header plus a few rows puts them in
+ * their final position from the first frame.
+ *
+ * Six rather than a screenful on purpose. Overshooting would make the list
+ * *shrink* when a workspace holds fewer Tasks than the placeholder promised,
+ * and a list that collapses upward on arrival is the same jolt as one that
+ * grows downward — except a workspace with more Tasks than this simply extends
+ * past the fold, which nobody sees happen.
+ */
+const SKELETON_ROWS = 6;
+
+function ListSkeleton() {
+  return (
+    <div className="motion-safe:animate-pulse">
+      <TaskListHeader />
+      <div className="divide-y divide-border">
+        {Array.from({ length: SKELETON_ROWS }, (_, i) => (
+          <TaskRowSkeleton key={i} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What the dashboard renders while `TaskList` itself is still suspended.
+ *
+ * `TaskList` reads `useSearchParams()`, so the server ships this fallback's
+ * markup and the component only takes over at hydration. That handoff is a
+ * second place the page could jolt: a spinner here and a skeleton there meant
+ * the list moved once before any data had even been requested. This mirrors the
+ * loading state exactly — same heading, same bar height, same container, same
+ * rows — so the first paint and the first client render are the same picture.
+ */
+export function TaskListFallback() {
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h1 className="text-xl font-semibold text-fg">작업</h1>
+      </div>
+      <TaskFilterBarSkeleton />
+      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+        <ListSkeleton />
+      </div>
+    </div>
+  );
+}
 
 const SECTION_LABEL: Record<"active" | "attention" | "done", string> = {
   active: "진행 중",
@@ -490,6 +549,11 @@ export function TaskList() {
           counts={counts}
           projectOptions={projectOptions}
         />
+      ) : loading ? (
+        // Not "no Tasks, so no controls" yet — just "not known". Holding the
+        // bar's height here is what stops the list below from being shoved
+        // down the moment the first poll answers.
+        <TaskFilterBarSkeleton />
       ) : null}
 
       {/*
@@ -500,7 +564,7 @@ export function TaskList() {
       */}
       <div className="overflow-hidden rounded-lg border border-border bg-surface">
         {loading && tasks.length === 0 ? (
-          <LoadingState label="작업 목록을 불러오는 중" padding="md" className="justify-center" />
+          <ListSkeleton />
         ) : error ? (
           <ErrorState
             message={`목록을 불러오지 못했습니다: ${error}`}
