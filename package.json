@@ -14,7 +14,9 @@
     "typecheck": "pnpm -r run typecheck",
     "lint": "pnpm -r run lint",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "setup:usage-hook": "node scripts/setup-usage-hook.mjs",
+    "uninstall:usage-hook": "node scripts/setup-usage-hook.mjs --uninstall"
   },
   "devDependencies": {
     "prettier": "^3.3.3",

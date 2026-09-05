@@ -10,7 +10,8 @@
 리뷰 Step은 실제 git diff가 있을 때만 수행됩니다.
 
 자세한 구조는 [docs/architecture.md](docs/architecture.md), 상태 전이는
-[docs/task-lifecycle.md](docs/task-lifecycle.md)를 참고하세요.
+[docs/task-lifecycle.md](docs/task-lifecycle.md), 사용량 패널은
+[docs/usage-panel.md](docs/usage-panel.md)를 참고하세요.
 
 ## 요구 사항
 
@@ -53,6 +54,21 @@ cp apps/web/.env.local.example apps/web/.env.local
 기본값(서버 `9914`포트, 웹 `9913`포트, `CLAUDE_PERMISSION_MODE=acceptEdits`)
 그대로도 로컬에서 바로 동작합니다. 각 파일의 주석을 참고해 필요한 값만
 조정하세요.
+
+## 사용량 패널 (선택)
+
+작업 목록 위에 Claude/Codex의 요금제 한도와 오늘 토큰 사용량을 표시합니다.
+Codex는 설정 없이 바로 동작하고, **Claude의 한도 게이지만** 상태줄 훅이
+필요합니다.
+
+```bash
+pnpm setup:usage-hook      # 변경 내용을 보여주고 확인 후 설치
+pnpm uninstall:usage-hook  # 이전 상태줄로 되돌리기
+```
+
+기존 상태줄이 있으면 감싸서 그대로 실행하므로 터미널 출력은 바뀌지 않습니다.
+설치하지 않아도 나머지 항목은 정상 표시됩니다. 자세한 내용과 한계는
+[docs/usage-panel.md](docs/usage-panel.md) 참고.
 
 ## 개발 실행
 
@@ -238,7 +254,9 @@ ai-task-router/
 │  └─ shared/  # apps/web, apps/server가 공유하는 타입
 ├─ docs/
 │  ├─ architecture.md
-│  └─ task-lifecycle.md
+│  ├─ task-lifecycle.md
+│  └─ usage-panel.md
+├─ scripts/   # 저장소 밖(~/.claude) 설정을 다루는 설치 스크립트
 ├─ pnpm-workspace.yaml
 └─ package.json
 ```

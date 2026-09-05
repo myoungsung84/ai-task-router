@@ -33,4 +33,15 @@ export const config = {
 
   /** CORS origin for the web dashboard. */
   webOrigin: process.env.WEB_ORIGIN ?? "http://localhost:9913",
+
+  /**
+   * Show the Codex account's email on the usage panel. Off unless explicitly
+   * enabled, because that one string is the only reason to open
+   * `~/.codex/auth.json`, and that file also holds live access and refresh
+   * tokens. Left off, the panel never reads a credential file at all — the
+   * Codex plan comes from the session rollout instead, and only the account
+   * label is missing. Claude is unaffected either way: its profile lives in
+   * `~/.claude.json`, which holds no tokens.
+   */
+  usageShowAccount: (process.env.USAGE_SHOW_ACCOUNT ?? "").toLowerCase() === "true",
 };

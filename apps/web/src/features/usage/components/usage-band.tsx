@@ -139,6 +139,7 @@ function stalenessClass(observedAt: string | null): string {
 function AgentRow({ usage }: { usage: AgentUsage }) {
   const name = usage.agent === "claude" ? "Claude" : "Codex";
   const account = usage.account;
+  const label = shortAccount(account?.email ?? null);
   // The row carries a short account label; the full address, the organization
   // and the reset moments live here, where confirming exactly which login is
   // in use does not cost the row a column.
@@ -165,19 +166,19 @@ function AgentRow({ usage }: { usage: AgentUsage }) {
 
       {/* Who, then what plan — the two accounts are different providers under
           different subscriptions, so the row says which one it is reporting on
-          rather than leaving that to a hover. */}
+          rather than leaving that to a hover. The account half is absent
+          whenever the server did not read one (Codex's is behind
+          USAGE_SHOW_ACCOUNT), and then the plan simply moves left rather than
+          sitting after a placeholder dash for something nobody asked to see. */}
       <span className="flex w-[10.5rem] shrink-0 items-center gap-1.5 overflow-hidden">
-        <span className="truncate text-fg-secondary">
-          {shortAccount(account?.email ?? null) ?? "-"}
-        </span>
-        {account?.plan ? (
-          <>
-            <span aria-hidden className="text-fg-faint">
-              ·
-            </span>
-            <span className="shrink-0 text-fg-muted">{account.plan}</span>
-          </>
+        {label ? <span className="truncate text-fg-secondary">{label}</span> : null}
+        {label && account?.plan ? (
+          <span aria-hidden className="text-fg-faint">
+            ·
+          </span>
         ) : null}
+        {account?.plan ? <span className="shrink-0 text-fg-muted">{account.plan}</span> : null}
+        {!label && !account?.plan ? <span className="text-fg-faint">-</span> : null}
       </span>
 
       {usage.unavailable && !usage.fiveHour && !usage.sevenDay ? (

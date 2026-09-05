@@ -11,11 +11,11 @@ export function formatTokens(tokens: number | null): string {
 /**
  * The short account label for the row: an email's local part.
  *
- * Not the profile name, which is what it looks like it should be — both CLIs
- * happen to be signed in under the same person's name here, so the names are
- * identical and identify nothing. `bi99` vs `myoungsung84` is what actually
- * says "this is the work account and that is the personal one", which is the
- * only question this column exists to answer.
+ * Not the profile name, which is what it looks like it should be. One person
+ * signed into both CLIs has the same name on both, so the names are identical
+ * and identify nothing; the email local parts differ, and telling a work
+ * account from a personal one is the only question this column exists to
+ * answer.
  */
 export function shortAccount(email: string | null): string | null {
   if (!email) return null;

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { AgentUsage, UsageAccount, UsageWindow } from "@ai-task-router/shared";
+import { config } from "../config";
 import { forEachJsonLine, readJsonFile } from "./jsonl";
 import { isToday, startOfTodayMs } from "./kst";
 
@@ -70,14 +71,18 @@ function listRollouts(): RolloutFile[] {
 /**
  * The email Codex is logged in as, out of the `id_token` in `~/.codex/auth.json`.
  *
- * That file also holds live `access_token` / `refresh_token` credentials. Only
- * the id_token's `email` claim is ever pulled out of it, and nothing from this
- * file is logged, cached to disk, or returned in any other shape — the payload
- * is decoded, one string is copied, and the rest is dropped. Treat any change
- * here as a security change: the whole point is that a credential file is read
- * without any part of a credential leaving this function.
+ * That file also holds live `access_token` / `refresh_token` credentials, so it
+ * is not opened at all unless `USAGE_SHOW_ACCOUNT` is on — the account label is
+ * a convenience, and a tool that reads a credential file by default has to
+ * justify itself to everyone who ever clones it. With the flag on, only the
+ * id_token's `email` claim is pulled out, and nothing from this file is logged,
+ * cached to disk, or returned in any other shape: the payload is decoded, one
+ * string is copied, and the rest is dropped. Treat any change here as a
+ * security change — the whole point is that a credential file is read without
+ * any part of a credential leaving this function.
  */
 function readCodexEmail(): string | null {
+  if (!config.usageShowAccount) return null;
   const auth = readJsonFile<{ tokens?: { id_token?: string } }>(AUTH_FILE);
   const idToken = auth?.tokens?.id_token;
   if (typeof idToken !== "string") return null;
