@@ -3,6 +3,7 @@ import path from "node:path";
 import type { AcceptanceCriterion, StepAction, StepPermission } from "@ai-task-router/shared";
 import { config } from "../../config";
 import { safeSpawn, killProcessTree } from "../common/process-utils";
+import { classifyFailure, runFailure, type RunFailureKind } from "../common/run-failure";
 import { REVIEW_OUTPUT_SCHEMA, buildReviewPrompt, parseReviewJson } from "../review-prompt";
 import type { AgentRunHandle, AgentRunOutcome, RunnerLogLine } from "../agent-types";
 
@@ -193,51 +194,69 @@ export function runCodexStep(
       const success = !cancelled && exitCode === 0;
       const summary = lastAgentMessage.trim() || null;
 
+      const failureKind = (): RunFailureKind =>
+        cancelled ? "CANCELLED" : (classifyFailure(executionErrors) ?? "EXECUTION_FAILED");
+
       if (action !== "review") {
-        resolve({ exitCode, success, cancelled, summary, review: null });
+        resolve({
+          exitCode,
+          success,
+          cancelled,
+          summary,
+          review: null,
+          failure: success ? null : runFailure(failureKind()),
+        });
         return;
       }
 
       if (!success) {
+        const failure = runFailure(failureKind());
         if (!cancelled) {
-          const detail = executionErrors.at(-1);
           onLog({
             stream: "stderr",
-            text: `CODEX_EXECUTION_FAILED: Codex CLI가 비정상 종료했습니다 (exitCode=${String(exitCode)})${detail ? ` — ${detail}` : ""}`,
+            text: `CODEX_REVIEW_FAILED(${failure.kind}): ${failure.message} (exitCode=${String(exitCode)})`,
           });
         }
-        resolve({ exitCode, success: false, cancelled, summary, review: null });
+        resolve({ exitCode, success: false, cancelled, summary, review: null, failure });
         return;
       }
 
       const raw = lastMessagePath ? readFileSafe(lastMessagePath) : null;
       const parsed = raw ? parseReviewJson(raw) : null;
-      if (!parsed) {
-        onLog({
-          stream: "stderr",
-          text: `CODEX_REVIEW_PARSE_FAILED: Codex CLI는 정상 종료했지만 리뷰 JSON을 파싱하지 못했습니다 (exitCode=${String(exitCode)}).`,
-        });
-        resolve({
-          exitCode,
-          success: false,
-          cancelled,
-          summary,
-          review: {
-            result: "WARNING",
-            issues: [
-              {
-                severity: "high",
-                category: "OTHER",
-                file: "",
-                message: `Codex 리뷰 결과를 파싱하지 못했습니다 (exitCode=${String(exitCode)}). 로그를 확인하세요.`,
-              },
-            ],
-            raw,
-          },
-        });
+      if (parsed?.ok) {
+        resolve({ exitCode, success, cancelled, summary, review: parsed.review, failure: null });
         return;
       }
-      resolve({ exitCode, success, cancelled, summary, review: parsed });
+
+      // `-o` writes the last message to a file, so there is no tail to
+      // truncate here — an unusable answer is either missing entirely or in
+      // the wrong shape, and `--output-schema` already makes the latter rare.
+      const failure = runFailure(
+        classifyFailure(executionErrors) ?? parsed?.kind ?? "PARSE_FAILED",
+      );
+      onLog({
+        stream: "stderr",
+        text: `CODEX_REVIEW_UNUSABLE(${failure.kind}): ${failure.message}`,
+      });
+      resolve({
+        exitCode,
+        success: false,
+        cancelled,
+        summary,
+        review: {
+          result: "WARNING",
+          issues: [
+            {
+              severity: "high",
+              category: "OTHER",
+              file: "",
+              message: failure.message,
+            },
+          ],
+          raw,
+        },
+        failure,
+      });
     };
 
     child.on("error", (err) => {

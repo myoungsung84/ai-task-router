@@ -292,9 +292,13 @@ export async function executeTask(taskId: string, projectPathKey: string): Promi
         if (step.action === "review") {
           // The reviewer itself failed to run — don't discard earlier Steps'
           // work. The runner logs the execution failure details.
-          const reviewFailureMessage = outcome.review
-            ? "리뷰 결과 파싱에 실패했습니다."
-            : "리뷰 실행에 실패했습니다.";
+          // The runner already classified this — usage limit, auth, a
+          // response this app truncated. The two-way "실행/파싱" split this
+          // replaces named the wrong cause for most real failures, which sent
+          // the reader looking in the wrong place.
+          const reviewFailureMessage =
+            outcome.failure?.message ??
+            (outcome.review ? "리뷰 결과를 읽지 못했습니다." : "리뷰 실행에 실패했습니다.");
           commitStep(
             taskId,
             step.id,
@@ -313,7 +317,9 @@ export async function executeTask(taskId: string, projectPathKey: string): Promi
           );
           continue;
         }
-        const message = `${agentLabelKo(step.agent)} ${actionLabelKo(step.action)}이(가) 비정상 종료했습니다 (exitCode=${String(outcome.exitCode)}).`;
+        const message = outcome.failure
+          ? `${agentLabelKo(step.agent)} ${actionLabelKo(step.action)}이(가) 실패했습니다 — ${outcome.failure.message} (exitCode=${String(outcome.exitCode)})`
+          : `${agentLabelKo(step.agent)} ${actionLabelKo(step.action)}이(가) 비정상 종료했습니다 (exitCode=${String(outcome.exitCode)}).`;
         commitStep(
           taskId,
           step.id,

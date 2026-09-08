@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type {
   AcceptanceCriterion,
   ReviewIssue,
@@ -229,24 +230,79 @@ export const REVIEW_OUTPUT_SCHEMA = {
   },
 };
 
-/** Scans backward for the last balanced top-level `{...}` block — used when an agent's plain-text output should be exactly one trailing JSON object but might have stray prose around it. */
+/**
+ * Every balanced top-level `{...}` block in `text`, in the order they appear.
+ *
+ * Scans **forward** and tracks string state, which is the whole point. The
+ * previous version scanned backward counting braces, and a backward scan
+ * cannot know whether a `"` opens or closes a string — so a `}` inside a
+ * review message (`"suggestion": "use ${foo}"`, or any quoted code) was
+ * counted as structure and threw the depth off. Review messages quote code
+ * constantly, so that was not a corner case.
+ */
+function topLevelJsonObjects(text: string): string[] {
+  const found: string[] = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}") {
+      // A stray closing brace in prose, with nothing open — not structure.
+      if (depth === 0) continue;
+      depth--;
+      if (depth === 0 && start !== -1) {
+        found.push(text.slice(start, i + 1));
+        start = -1;
+      }
+    }
+  }
+
+  return found;
+}
+
+/**
+ * The agent's trailing JSON object, out of output that may carry prose or a
+ * ```json fence around it.
+ *
+ * Code fences need no stripping — backticks are not braces, so the scanner
+ * walks straight past them. What matters is picking the *last* block that
+ * actually parses: an agent that explains itself first can leave an earlier
+ * brace-looking fragment in the prose.
+ */
 export function extractLastJsonObject(text: string): string | null {
   const trimmed = text.trim();
   try {
     JSON.parse(trimmed);
     return trimmed;
   } catch {
-    // fall through to bracket scanning below
+    // fall through to scanning below
   }
-  let depth = 0;
-  let end = -1;
-  for (let i = trimmed.length - 1; i >= 0; i--) {
-    if (trimmed[i] === "}") {
-      if (depth === 0) end = i;
-      depth++;
-    } else if (trimmed[i] === "{") {
-      depth--;
-      if (depth === 0 && end !== -1) return trimmed.slice(i, end + 1);
+
+  const candidates = topLevelJsonObjects(trimmed);
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    const candidate = candidates[i];
+    if (!candidate) continue;
+    try {
+      JSON.parse(candidate);
+      return candidate;
+    } catch {
+      continue;
     }
   }
   return null;
@@ -266,18 +322,60 @@ function parseReviewObject(raw: string): Record<string, unknown> | null {
   return data as Record<string, unknown>;
 }
 
-export function parseReviewJson(
-  raw: string,
-): Pick<
+/**
+ * Structural contract for a review answer.
+ *
+ * Strict about the fields that decide an outcome, lenient about the ones the
+ * normalizer below deliberately coerces. `result` gates PASS/WARNING, so a
+ * missing or unknown value must fail rather than default. `issues` and
+ * `acceptanceCriteria` must be arrays *of objects* — an array of strings means
+ * the agent answered in its own format, which the old code silently turned
+ * into "no issues found". The two booleans gate the Auto Fix Loop, and `=== true`
+ * alone would read the string `"true"` as false without saying so.
+ *
+ * `.strict()` is deliberately not used: an agent adding a field it was not
+ * asked for is not a reason to throw the review away.
+ */
+const reviewEnvelopeSchema = z.object({
+  result: z.union([z.literal("PASS"), z.literal("WARNING")]),
+  // Required, and it is what tells an envelope apart from one of its own
+  // parts. An acceptanceCriteria entry is also an object with a
+  // `result: "PASS"|"FAIL"` — so when only a fragment of a long answer
+  // survives, the last thing that still parses can be a single criterion,
+  // and reading that as the envelope turns a lost answer into a clean PASS.
+  // No criterion carries `issues`; every real review does.
+  issues: z.array(z.record(z.string(), z.unknown())),
+  // Additive fields: a review stored before they existed has neither, and
+  // that is not a reason to refuse to read it back.
+  acceptanceCriteria: z.array(z.record(z.string(), z.unknown())).nullish(),
+  needsClarification: z.boolean().nullish(),
+  riskyChangeDetected: z.boolean().nullish(),
+});
+
+type ParsedReview = Pick<
   ReviewOutcome,
   "result" | "issues" | "raw" | "acceptanceCriteria" | "needsClarification" | "riskyChangeDetected"
-> | null {
-  const obj = parseReviewObject(raw);
-  if (!obj) return null;
+>;
 
-  let result: "PASS" | "WARNING" | null =
-    obj.result === "WARNING" ? "WARNING" : obj.result === "PASS" ? "PASS" : null;
-  if (!result) return null;
+/**
+ * Why a review answer could not be turned into a result.
+ *
+ * The two are worth separating because they point at different things: no
+ * JSON at all usually means the run never got to answer (it was cut off, hit a
+ * limit, or died), while JSON in the wrong shape means it answered and the
+ * format instruction did not land.
+ */
+export type ReviewParseResult =
+  { ok: true; review: ParsedReview } | { ok: false; kind: "PARSE_FAILED" | "SCHEMA_INVALID" };
+
+export function parseReviewJson(raw: string): ReviewParseResult {
+  const obj = parseReviewObject(raw);
+  if (!obj) return { ok: false, kind: "PARSE_FAILED" };
+
+  const validated = reviewEnvelopeSchema.safeParse(obj);
+  if (!validated.success) return { ok: false, kind: "SCHEMA_INVALID" };
+
+  let result: "PASS" | "WARNING" = validated.data.result;
 
   const VALID_CATEGORIES: ReviewIssueCategory[] = [
     "SECURITY",
@@ -286,7 +384,7 @@ export function parseReviewJson(
     "OTHER",
   ];
 
-  const issuesRaw = Array.isArray(obj.issues) ? obj.issues : [];
+  const issuesRaw = validated.data.issues;
   const issues: ReviewIssue[] = issuesRaw
     .filter((i): i is Record<string, unknown> => typeof i === "object" && i !== null)
     .map((i) => ({
@@ -312,7 +410,7 @@ export function parseReviewJson(
       suggestion: typeof i.suggestion === "string" && i.suggestion.trim() ? i.suggestion : null,
     }));
 
-  const acceptanceCriteriaRaw = Array.isArray(obj.acceptanceCriteria) ? obj.acceptanceCriteria : [];
+  const acceptanceCriteriaRaw = validated.data.acceptanceCriteria ?? [];
   const acceptanceCriteria = acceptanceCriteriaRaw
     .filter((c): c is Record<string, unknown> => typeof c === "object" && c !== null)
     .map((c) => ({
@@ -330,12 +428,15 @@ export function parseReviewJson(
   }
 
   return {
-    result,
-    issues,
-    raw,
-    acceptanceCriteria: acceptanceCriteria.length > 0 ? acceptanceCriteria : null,
-    needsClarification: obj.needsClarification === true,
-    riskyChangeDetected: obj.riskyChangeDetected === true,
+    ok: true,
+    review: {
+      result,
+      issues,
+      raw,
+      acceptanceCriteria: acceptanceCriteria.length > 0 ? acceptanceCriteria : null,
+      needsClarification: validated.data.needsClarification === true,
+      riskyChangeDetected: validated.data.riskyChangeDetected === true,
+    },
   };
 }
 

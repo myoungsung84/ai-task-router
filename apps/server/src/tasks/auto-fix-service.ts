@@ -21,15 +21,10 @@ function reviewOutcomeOf(step: WorkflowStep | undefined): ReviewOutcome | null {
   const raw = step?.result?.review?.raw;
   if (!raw) return null;
   const parsed = parseReviewJson(raw);
-  if (!parsed) return null;
-  return {
-    result: parsed.result,
-    issues: parsed.issues,
-    raw: parsed.raw,
-    acceptanceCriteria: parsed.acceptanceCriteria,
-    needsClarification: parsed.needsClarification,
-    riskyChangeDetected: parsed.riskyChangeDetected,
-  };
+  // A review that no longer parses (or never did) must not become a real one
+  // here — same reason as before, now with the failure kind available to the
+  // caller if it ever needs to say *why*.
+  return parsed.ok ? parsed.review : null;
 }
 
 /**

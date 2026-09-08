@@ -169,7 +169,22 @@ overrides?)`, the one function that turns a `TaskPurpose` + `Settings.roles`
 - `runners/review-prompt.ts` — the review prompt text, the JSON Schema
   `{ result, issues[] }`, and the output parser, shared by both agents so a
   Claude-reviews-Codex Workflow and a Codex-reviews-Claude Workflow produce
-  identically-shaped results.
+  identically-shaped results. The parser returns
+  `{ ok: true, review } | { ok: false, kind }` rather than `null`, validates
+  the envelope with zod, and scans for the trailing JSON object **forward**
+  with string-state tracking — a backward brace scan cannot tell an opening
+  quote from a closing one, so a `}` inside a review message (quoted code,
+  constantly) was counted as structure. `issues` is required precisely because
+  an `acceptanceCriteria` entry is also an object with `result: "PASS"`: when
+  only a fragment of a long answer survives, reading one of those as the
+  envelope turns a lost answer into a clean PASS.
+- `runners/common/run-failure.ts` — `RunFailureKind` and its Korean messages,
+  shared by both runners. `success: false` alone could not distinguish a usage
+  limit from an auth error from a response this app itself truncated, and the
+  dashboard showed one of two sentences for all of them; each kind now says
+  what to actually do about it. A cause is only named when it was observed —
+  unmatched output stays `EXECUTION_FAILED` ("read the log") rather than
+  guessing.
 - `runners/claude/claude-runner.ts` — spawns `claude -p "<prompt>"
 --permission-mode <mode>` (plus `--model <model>` when the Step has one) with
   `cwd` set to the project path. `permission: "write"` → `acceptEdits`;
@@ -177,6 +192,19 @@ overrides?)`, the one function that turns a `TaskPurpose` + `Settings.roles`
   edits). For a `review` Step the prompt asks for the `{result, issues[]}`
   JSON directly (Claude's `-p` mode has no schema-enforcement flag equivalent
   to Codex's `--output-schema`), parsed back out of the trailing output.
+
+  **Two buffers, deliberately.** `summary` is the last 4000 characters, for a
+  glance without opening the logs; the review JSON is parsed from the full
+  output (bounded by `REVIEW_OUTPUT_LIMIT`, a memory bound no real review
+  reaches). They were once the same 4000-character buffer, which meant every
+  review long enough to have eight Acceptance Criteria arrived with its
+  opening brace cut off and failed to parse while the CLI reported success —
+  so the more thorough the review, the more reliably it was lost. A trailing
+  chunk with no final newline is also flushed into that buffer now; it used to
+  be logged and dropped, taking the end of the JSON with it. If the bound is
+  ever hit, the failure is reported as `RESPONSE_TRUNCATED`, not as a parse
+  failure: the answer was fine and this app is what lost part of it.
+
 - `runners/codex/codex-runner.ts` — for `implement`/`analyze` Steps, spawns
   `codex exec --json --sandbox <read-only|workspace-write> "<instruction>"`.
   For `review` Steps, spawns `codex exec --json -o <file> --output-schema

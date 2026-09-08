@@ -1,4 +1,5 @@
 import type { ReviewOutcome } from "@ai-task-router/shared";
+import type { RunFailure } from "./common/run-failure";
 
 export interface RunnerLogLine {
   stream: "stdout" | "stderr";
@@ -19,4 +20,12 @@ export interface AgentRunOutcome {
   summary: string | null;
   /** Present only for `review`-action steps. */
   review: ReviewOutcome | null;
+  /**
+   * Why the run produced no usable result — `null` when it succeeded.
+   *
+   * `success: false` alone cannot tell a usage limit from an auth error from
+   * a response this app truncated, and those need different things from the
+   * person reading the Task.
+   */
+  failure: RunFailure | null;
 }
