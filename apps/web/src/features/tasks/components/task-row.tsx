@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import Link from "next/link";
 import { Trash2 } from "lucide-react";
 import { cn, formatDuration, projectName } from "@/lib/format";
@@ -9,7 +9,6 @@ import { AgentAvatar } from "@/components/agent-icon";
 import { Badge, type Tone } from "@/components/badge";
 import { TaskStatusBadge } from "./task-status-badge";
 import { JobIdTag } from "./job-id-tag";
-import { useRevealIn } from "../hooks/use-row-transition";
 import {
   AGENT_LABEL,
   ATTENTION_REASON_LABEL,
@@ -223,16 +222,11 @@ function RowShell({
   task,
   actions,
   className,
-  entering = false,
 }: {
   task: TaskListItem;
   actions: ReactNode;
   className?: string;
-  entering?: boolean;
 }) {
-  const rootRef = useRef<HTMLDivElement>(null);
-  useRevealIn(rootRef, entering);
-
   const result = resultLine(task);
   const attentionReason = attentionReasonOf(task);
   const agents = Array.from(new Set(task.workflow.steps.map((s) => s.agent)));
@@ -243,22 +237,14 @@ function RowShell({
   // title alone and settle back to one line on the same padding.
   return (
     <div
-      ref={rootRef}
-      data-row-id={task.id}
-      // Always present, including while entering. It was withheld at first on
-      // the grounds that FLIP would fight the row's own motion — true when the
-      // row animated its height, and false now that it only fades. Excluding
-      // it meant that when the section headings disappeared at the end of a
-      // handoff, every other row eased 56px upward while this one teleported.
+      // FLIP moves this row when the list re-lays out around it — see
+      // `useFlipRows`. A row no longer animates anything of its own, so there
+      // is nothing for that transform to fight.
       data-flip-id={`task:${task.id}`}
       className={cn(ROW_BASE, "py-4", className)}
     >
-      {/* The row's frame: present from the first frame of an arrival and never
-          faded with the contents, so the row grows in as a visible object
-          rather than as an empty gap that fills afterwards. */}
       <span
         aria-hidden
-        data-row-frame=""
         className={cn("absolute inset-y-0 left-0 w-[3px]", STATUS_RAIL[task.status])}
       />
       <div className={COL.status}>
@@ -342,7 +328,6 @@ function RowShell({
 export function TaskRow({
   task,
   onDeleteClick,
-  entering = false,
 }: {
   task: TaskListItem;
   onDeleteClick: (task: TaskListItem) => void;
@@ -352,12 +337,10 @@ export function TaskRow({
    * exit, which fades before it closes. Doing both at once in either direction
    * reads as the list being shoved rather than making room.
    */
-  entering?: boolean;
 }) {
   return (
     <RowShell
       task={task}
-      entering={entering}
       actions={
         <IconButton
           label={`${task.jobId} 삭제`}

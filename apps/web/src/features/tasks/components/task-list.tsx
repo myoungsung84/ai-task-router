@@ -23,7 +23,6 @@ import { useToast } from "@/components/toast";
 import { projectName } from "@/lib/format";
 import { describeRange, isWithinRange } from "../date-range";
 import { statusGroupOf } from "../types";
-import { FADE_MS, SIZE_MS, beginCardClose, prefersReduced } from "../hooks/use-row-transition";
 import {
   ATTENTION_REASON_LABEL,
   attentionReasonOf,
@@ -114,128 +113,6 @@ function attentionBreakdownText(items: TaskListItem[]): string | null {
   return parts.length > 1 ? parts.join(" · ") : null;
 }
 
-/*
- * The move from 진행 중 down to 완료, as one timeline measured from the moment
- * the Task stops running.
- *
- *   0ms    the card's contents fade
- *   240ms  the card's height closes  ── and, at the same instant, the 완료 row
- *          begins growing into place, frame first
- *   620ms  the card is gone; the row is at full height
- *   860ms  the row's contents have resolved inside it
- *
- * The overlap in the middle is the point. Run in sequence — card fully closed,
- * *then* row opened — everything below travelled 108px up and 52px back down,
- * two opposing moves for one event, which is what read as "not smooth" no
- * matter how the easing was tuned. Overlapped, the closing gap and the opening
- * one cancel to a single continuous shift.
- *
- * The cost is that the Task is briefly in both sections at once. That is safe
- * only because the overlap starts at 240ms — after the card's contents have
- * faded to nothing — so what is duplicated is an invisible collapsing box, not
- * a second copy of the row.
- */
-const CARD_FADE_MS = FADE_MS;
-const SETTLE_MS = FADE_MS + SIZE_MS;
-const TOTAL_MS = FADE_MS + SIZE_MS + FADE_MS;
-
-/**
- * A little slack past the arithmetic end, so a frame of scheduling jitter can
- * never unmount an element while its own transition is still running — the
- * failure that made a card look like it vanished rather than closed.
- */
-const TAIL_MS = 90;
-
-interface TaskTransitions {
-  /** Held in 진행 중, playing the card's exit. */
-  settling: Set<string>;
-  /** Growing into 완료. Overlaps `settling` for the middle of the handoff. */
-  entering: Set<string>;
-}
-
-/**
- * Both halves of that timeline, derived from one start time per Task.
- *
- * **Detection happens during render, not in an effect, and that is the whole
- * point of this shape.** A passive `useEffect` runs after the browser is free
- * to paint, so on the render that first carried the finished Task the list had
- * no transition recorded yet, put the Task straight into 완료, and painted the
- * finished row at its natural height — the flash that was read as "it pops".
- * Only afterwards did the effect notice, and a later tick moved it back to a
- * card so the animation could start from a state the user had already seen.
- *
- * Writing to the ref here is guarded by the identity of `activeIds` and by
- * `startedRef` itself, so it is idempotent: a repeated render (StrictMode, a
- * bail-out) cannot start a second timeline for the same Task.
- *
- * Re-renders are scheduled at the phase boundaries themselves rather than by
- * polling. An earlier version ticked every 60ms, which quantised every phase
- * start by up to a frame's worth of time while the end was still measured from
- * the original timestamp — so the two clocks disagreed and elements were
- * dropped early.
- */
-function useTaskTransitions(tasks: TaskListItem[]): TaskTransitions {
-  const prevActiveRef = useRef<Set<string> | null>(null);
-  const startedRef = useRef<Map<string, number>>(new Map());
-  const [, bump] = useState(0);
-
-  const activeIds = useMemo(
-    () => new Set(tasks.filter((t) => statusGroupOf(t.status) === "active").map((t) => t.id)),
-    [tasks],
-  );
-
-  if (prevActiveRef.current !== activeIds) {
-    const previous = prevActiveRef.current;
-    prevActiveRef.current = activeIds;
-    if (previous) {
-      const startedAt = Date.now();
-      // With motion reduced the hooks below animate nothing, so running the
-      // timeline anyway just held the Task in 진행 중 for 950ms and then
-      // dropped it — slower than no animation and just as abrupt.
-      for (const id of prefersReduced() ? [] : previous) {
-        // Still present in the list, no longer active, not already moving —
-        // a Task that was *deleted* simply goes, with nothing to animate.
-        if (!activeIds.has(id) && !startedRef.current.has(id) && tasks.some((t) => t.id === id)) {
-          startedRef.current.set(id, startedAt);
-        }
-      }
-    }
-  }
-
-  const now = Date.now();
-  const settling = new Set<string>();
-  const entering = new Set<string>();
-  let nextBoundary = Infinity;
-
-  for (const [id, startedAt] of startedRef.current) {
-    const elapsed = now - startedAt;
-    if (elapsed < SETTLE_MS) settling.add(id);
-    if (elapsed >= CARD_FADE_MS) entering.add(id);
-    // The next moment this Task changes what it renders.
-    for (const boundary of [CARD_FADE_MS, SETTLE_MS, TOTAL_MS + TAIL_MS]) {
-      if (elapsed < boundary) {
-        nextBoundary = Math.min(nextBoundary, startedAt + boundary);
-        break;
-      }
-    }
-  }
-
-  useEffect(() => {
-    if (!Number.isFinite(nextBoundary)) return;
-    const wait = Math.max(0, nextBoundary - Date.now());
-    const timer = setTimeout(() => {
-      const at = Date.now();
-      for (const [id, startedAt] of startedRef.current) {
-        if (at - startedAt >= TOTAL_MS + TAIL_MS) startedRef.current.delete(id);
-      }
-      bump((v) => v + 1);
-    }, wait);
-    return () => clearTimeout(timer);
-  }, [nextBoundary]);
-
-  return { settling, entering };
-}
-
 /**
  * Everything that did not itself animate still has to get out of the way, and
  * by default it does so by teleporting: the 진행 중 heading disappears the
@@ -245,9 +122,11 @@ function useTaskTransitions(tasks: TaskListItem[]): TaskTransitions {
  *
  * Standard FLIP fixes it. Measure where each row was, let React place it where
  * it now belongs, then put it straight back with a transform and release it.
- * Rows playing their own height animation are excluded (`data-flip-id` is
- * withheld while entering) — transforming an element that is mid-collapse
- * fights its own keyframes.
+ *
+ * This is the only motion left in the list, and it is transform-only — it can
+ * move a row but never change what the layout is, so it cannot make the page
+ * bob. Rows used to be excluded from it while they played a height animation
+ * of their own; nothing animates its height any more, so nothing is excluded.
  */
 function useFlipRows(containerRef: RefObject<HTMLElement | null>, signature: string) {
   const prevRects = useRef<Map<string, number>>(new Map());
@@ -343,81 +222,23 @@ export function TaskList() {
     [tasks],
   );
 
-  const { settling: settlingIds, entering: enteringIds } = useTaskTransitions(tasks);
   const listRef = useRef<HTMLDivElement>(null);
 
   /**
-   * The compensation, done in the commit that inserts the arriving row and
-   * before the browser paints it.
+   * Which section a Task is drawn in — exactly one, always.
    *
-   * The previous version measured "some row already on screen" into a ref and
-   * let the leaving card shrink itself on its own `setTimeout`. Both halves
-   * were wrong. The selector took the first Task row in DOM order, and since
-   * a running card carries no `data-flip-id` that was a 확인 필요 row whenever
-   * one existed — about 72px against the 완료 row's 52 — so the card handed
-   * back twenty pixels that were never taken. And the card's timer and the
-   * render that inserted the row were two independent clocks, so whichever
-   * landed first got a frame of the list at the wrong height.
-   *
-   * Here the row is measured *after* it exists and the card is shrunk before
-   * anything is drawn, so the insertion genuinely costs the list nothing.
+   * A Task used to be drawn in two at once for 380ms, so that a card closing
+   * above and a row growing below could overlap into a single continuous
+   * shift. That timeline is gone: it depended on wall-clock phases racing the
+   * poller, and when a status changed again mid-flight, or two Tasks finished
+   * together, the list moved down and back up instead. A Task now simply
+   * appears where it belongs on the render that carries its new status, and
+   * `useFlipRows` eases everything around it into place.
    */
-  const compensatedRef = useRef<Set<string>>(new Set());
-  const enteringKey = Array.from(enteringIds).sort().join(",");
-  useLayoutEffect(() => {
-    const root = listRef.current;
-    if (!root || prefersReduced()) return;
+  const groupsOf = useMemo(() => (t: TaskListItem) => [statusGroupOf(t.status)], []);
 
-    for (const id of enteringKey ? enteringKey.split(",") : []) {
-      if (compensatedRef.current.has(id)) continue;
-      compensatedRef.current.add(id);
-
-      const row = root.querySelector<HTMLElement>(`[data-row-id="${id}"]`);
-      const card = root.querySelector<HTMLElement>(`[data-card-id="${id}"]`);
-      // No card to take the space from — the destination section is filtered
-      // out of view, or the Task went straight there. Nothing to compensate.
-      if (!row || !card) continue;
-
-      beginCardClose(card, row.getBoundingClientRect().height);
-    }
-
-    for (const id of compensatedRef.current) {
-      if (!enteringIds.has(id)) compensatedRef.current.delete(id);
-    }
-  }, [enteringKey, enteringIds]);
-
-  /**
-   * Which sections a Task is drawn in.
-   *
-   * Normally one, and the mid-handoff overlap is the single exception: a Task
-   * whose card is still closing above while its row is already growing below
-   * is genuinely in two places, and saying so here is what lets the two
-   * motions run at once (see `useTaskTransitions`).
-   */
-  const groupsOf = useMemo(
-    () => (t: TaskListItem) => {
-      const real = statusGroupOf(t.status);
-      const groups: MainFilter[] = [];
-      if (real === "active" || settlingIds.has(t.id)) groups.push("active");
-      // Its destination, once it has started arriving there — or immediately,
-      // for anything not in the middle of a handoff at all.
-      if (real !== "active" && (enteringIds.has(t.id) || !settlingIds.has(t.id))) {
-        groups.push(real);
-      }
-      return groups;
-    },
-    [settlingIds, enteringIds],
-  );
-
-  /**
-   * The single group a Task *belongs* to, for the filter chips and their
-   * counts. Deliberately not `groupsOf`: a Task counted in two places for
-   * 380ms would make the totals above the list twitch every time one finished.
-   */
-  const groupKeyOf = useMemo(
-    () => (t: TaskListItem) => (settlingIds.has(t.id) ? "active" : statusGroupOf(t.status)),
-    [settlingIds],
-  );
+  /** The group a Task belongs to, for the filter chips and their counts. */
+  const groupKeyOf = useMemo(() => (t: TaskListItem) => statusGroupOf(t.status), []);
 
   const filtered = useMemo(() => {
     const q = filters.search.trim().toLowerCase();
@@ -624,15 +445,9 @@ export function TaskList() {
                         onCancelClick={setCancelTarget}
                         onStartClick={onStartClick}
                         starting={startingIds.has(t.id)}
-                        leaving={settlingIds.has(t.id)}
                       />
                     ) : (
-                      <TaskRow
-                        key={t.id}
-                        task={t}
-                        onDeleteClick={setDeleteTarget}
-                        entering={enteringIds.has(t.id)}
-                      />
+                      <TaskRow key={t.id} task={t} onDeleteClick={setDeleteTarget} />
                     ),
                   )}
                 </div>

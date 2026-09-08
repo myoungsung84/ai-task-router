@@ -6,9 +6,7 @@ import { IconButton } from "@/components/button";
 import { AgentMark } from "@/features/agents/components/agent-character";
 import { deriveAgentPresence } from "@/features/agents/agent-activity";
 import { cn, formatDuration, projectName } from "@/lib/format";
-import { useRef } from "react";
 import { useTask } from "../hooks/use-task";
-import { useCollapseOut } from "../hooks/use-row-transition";
 import { useNowTick } from "../hooks/use-now-tick";
 import { ActivityEqualizer, StallBadge } from "./activity-trace";
 import { JobIdTag } from "./job-id-tag";
@@ -46,7 +44,6 @@ export function ActiveTaskCard({
   onCancelClick,
   onStartClick,
   starting = false,
-  leaving = false,
 }: {
   task: TaskListItem;
   onCancelClick: (task: TaskListItem) => void;
@@ -59,15 +56,11 @@ export function ActiveTaskCard({
    * point, because the status it reads is terminal; this only fades what is
    * left and closes the gap it occupied.
    */
-  leaving?: boolean;
 }) {
   // Same live subscription the row had — the card only changes how it is
   // drawn, not where its data comes from.
   const { task: live } = useTask(listTask.id);
   const task = live ?? listTask;
-
-  const rootRef = useRef<HTMLDivElement>(null);
-  useCollapseOut(rootRef, leaving);
 
   const isQueued = task.status === "QUEUED";
   // Executing, as opposed to sitting in the queue. Drives both the 1s tick and
@@ -92,10 +85,8 @@ export function ActiveTaskCard({
 
   return (
     <div
-      ref={rootRef}
       // The list finds this card by id in the commit that inserts the matching
       // 완료 row, so it can shrink this one by exactly that row's height.
-      data-card-id={task.id}
       className={cn(
         "group relative flex items-start gap-4 px-4 py-4 transition-colors duration-fast hover:bg-fg/[0.03]",
       )}
