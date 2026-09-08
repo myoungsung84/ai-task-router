@@ -14,7 +14,15 @@ export class SettingsServiceError extends Error {
 // is simpler than re-reading the file every time.
 let cached: Settings | null = null;
 
-function parseRoles(input: unknown): RoleSettings {
+/**
+ * Validates a Role Settings payload.
+ *
+ * Exported so the "a model the catalog does not list is still stored as
+ * written" contract can be pinned by a test — the picker's cards are a
+ * convenience, and the server deliberately keeps no model list to validate
+ * against.
+ */
+export function parseRoles(input: unknown): RoleSettings {
   if (!input || typeof input !== "object") {
     throw new SettingsServiceError("roles가 필요합니다.");
   }

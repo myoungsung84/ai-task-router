@@ -1,13 +1,22 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Gauge, Sparkles, Zap } from "lucide-react";
+import { Gauge, Hourglass, Sparkles, Zap } from "lucide-react";
 import { cn } from "@/lib/format";
 import { Input } from "@/components/field";
 import { MODEL_CATALOG, findModelOption } from "@/lib/model-catalog";
 import type { AgentName } from "@/features/tasks/types";
 
-const SPEED_ICON = { 빠름: Zap, 보통: Gauge, 느림: Gauge } as const;
+/**
+ * One icon per speed, and a distinct one for each.
+ *
+ * 보통 and 느림 both used to be `Gauge`, so the icon only ever distinguished
+ * 빠름 from everything else — it looked like information and carried none.
+ * A model with no stated speed shows no icon at all rather than borrowing one;
+ * Codex reports no speed, and inventing an icon for it is the same guess as
+ * inventing the word.
+ */
+const SPEED_ICON = { 빠름: Zap, 보통: Gauge, 느림: Hourglass } as const;
 
 const CUSTOM = "__custom__";
 
@@ -67,7 +76,7 @@ export function ModelPicker({
 
   return (
     <div className="space-y-2">
-      <div className="inline-flex rounded-md border border-border bg-fg/[0.03] p-0.5">
+      <div className="inline-flex max-w-full flex-wrap rounded-md border border-border bg-fg/[0.03] p-0.5">
         {segments.map(({ key, model }) => {
           const isActive = key === activeKey;
           return (
@@ -84,7 +93,7 @@ export function ModelPicker({
                 }
               }}
               className={cn(
-                "flex h-7 items-center gap-1.5 rounded-[0.3125rem] px-3 text-xs font-medium transition-colors duration-fast",
+                "flex h-7 items-center gap-1.5 whitespace-nowrap rounded-[0.3125rem] px-3 text-xs font-medium transition-colors duration-fast",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
                 isActive ? "bg-fg/[0.1] text-fg" : "text-fg-muted hover:text-fg",
               )}
@@ -99,7 +108,10 @@ export function ModelPicker({
       {customOpen ? (
         <Input
           className="mono max-w-sm text-xs"
-          placeholder="예: claude-opus-4-20250514"
+          // The catalog is a curated subset, so this field is the documented
+          // way to reach a model it leaves out — the example names one the
+          // installed CLI actually accepts rather than a stale dated id.
+          placeholder={agent === "claude" ? "예: claude-fable-5-1" : "예: gpt-5.6-terra"}
           value={value ?? ""}
           onChange={(e) => {
             selfEditRef.current = true;
@@ -109,6 +121,7 @@ export function ModelPicker({
       ) : selected ? (
         <p className="flex items-center gap-1.5 text-xs text-fg-muted">
           {(() => {
+            if (!selected.speed) return null;
             const Icon = SPEED_ICON[selected.speed];
             return <Icon className="h-3 w-3 shrink-0 text-fg-faint" aria-hidden />;
           })()}
