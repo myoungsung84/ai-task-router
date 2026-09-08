@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { AgentUsage, UsageAccount, UsageWindow } from "@ai-task-router/shared";
+import type {
+  AgentUsage,
+  UsageAccount,
+  UsageAccountMatch,
+  UsageWindow,
+} from "@ai-task-router/shared";
 import { forEachJsonLine, readJsonFile } from "./jsonl";
 import { isToday, startOfTodayMs } from "./kst";
 
@@ -27,20 +32,38 @@ const SNAPSHOT_FILE = path.join(CLAUDE_HOME, "usage-snapshot.json");
 
 interface SnapshotWindow {
   usedPercent?: number;
+  windowMinutes?: number;
   resetsAt?: number;
 }
 
+/**
+ * Two shapes are read, not one.
+ *
+ * `version: 2` carries `accountUuid` plus `primary`/`secondary`. A snapshot
+ * written before that is `fiveHour`/`sevenDay` with no account, and it stays
+ * on disk until the next interactive turn overwrites it — so refusing to read
+ * it would blank the panel for everyone who upgrades without opening Claude
+ * Code first. It is read, and reported as `UNVERIFIABLE`.
+ */
 interface Snapshot {
+  version?: number;
   observedAt?: number;
-  fiveHour?: SnapshotWindow;
-  sevenDay?: SnapshotWindow;
+  accountUuid?: string | null;
+  primary?: SnapshotWindow | null;
+  secondary?: SnapshotWindow | null;
+  fiveHour?: SnapshotWindow | null;
+  sevenDay?: SnapshotWindow | null;
 }
 
 interface OauthAccount {
   emailAddress?: string;
   organizationName?: string;
   userRateLimitTier?: string;
+  accountUuid?: string;
 }
+
+/** The durations the pre-`version: 2` snapshot's key names stated, for snapshots that carry no length of their own. */
+const LEGACY_WINDOW_MINUTES = { primary: 300, secondary: 10080 } as const;
 
 /**
  * `default_claude_max_5x` -> `Max 5x`. The tier strings are an internal
@@ -65,29 +88,68 @@ function planLabel(tier: string | undefined): string | null {
     .join(" ");
 }
 
-function readAccount(): UsageAccount | null {
+interface CurrentAccount {
+  account: UsageAccount | null;
+  /** Opaque id used only to compare against the snapshot. Never returned to the client. */
+  uuid: string | null;
+}
+
+function readAccount(): CurrentAccount {
   const config = readJsonFile<{ oauthAccount?: OauthAccount }>(CLAUDE_CONFIG);
   const account = config?.oauthAccount;
-  if (!account) return null;
+  if (!account) return { account: null, uuid: null };
   return {
-    email: account.emailAddress ?? null,
-    plan: planLabel(account.userRateLimitTier),
-    organization: account.organizationName ?? null,
+    account: {
+      email: account.emailAddress ?? null,
+      plan: planLabel(account.userRateLimitTier),
+      organization: account.organizationName ?? null,
+    },
+    uuid: account.accountUuid ?? null,
   };
 }
 
-function toWindow(value: SnapshotWindow | undefined): UsageWindow | null {
+/**
+ * Does this snapshot belong to the account currently signed in?
+ *
+ * A snapshot with no id cannot be checked either way, and saying so is the
+ * honest answer — the alternative was to keep showing it as if it had been.
+ */
+function accountMatchOf(snapshot: Snapshot | null, currentUuid: string | null): UsageAccountMatch {
+  const stamped = snapshot?.accountUuid;
+  if (!snapshot || !stamped || !currentUuid) return "UNVERIFIABLE";
+  return stamped === currentUuid ? "VERIFIED" : "MISMATCHED";
+}
+
+function toWindow(
+  value: SnapshotWindow | null | undefined,
+  fallbackMinutes: number,
+): UsageWindow | null {
   if (!value || typeof value.usedPercent !== "number") return null;
-  // The shell hook writes 0 rather than null when Claude reported no reset
-  // time, so 0 means "absent" here, not "the epoch".
+  // The hook writes 0 rather than null when Claude reported no reset time, so
+  // 0 means "absent" here, not "the epoch".
   const resetsAtMs =
     typeof value.resetsAt === "number" && value.resetsAt > 0 ? value.resetsAt * 1000 : null;
   const expired = resetsAtMs !== null && resetsAtMs <= Date.now();
+  // An expired window reports null, not 0. The window did roll over, so the
+  // last-seen percentage describes something that no longer exists — but "it
+  // is now 0% used" is a claim about the new window that nothing here read.
+  // Only the next interactive turn can supply that.
+  const usedPercent = expired ? null : clampPercent(value.usedPercent);
   return {
-    usedPercent: expired ? 0 : value.usedPercent,
+    usedPercent,
+    remainingPercent: usedPercent === null ? null : 100 - usedPercent,
+    windowMinutes:
+      typeof value.windowMinutes === "number" && value.windowMinutes > 0
+        ? value.windowMinutes
+        : fallbackMinutes,
     resetsAt: resetsAtMs ? new Date(resetsAtMs).toISOString() : null,
     expired,
   };
+}
+
+function clampPercent(value: number): number | null {
+  if (!Number.isFinite(value)) return null;
+  return Math.min(100, Math.max(0, value));
 }
 
 /**
@@ -160,8 +222,20 @@ async function readTodayTokens(): Promise<number | null> {
   return sawAnyFile ? total : 0;
 }
 
+/**
+ * An identity for the signed-in Claude account, for cache invalidation only.
+ *
+ * The snapshot is cached for a few seconds, and without this a sign-in as
+ * someone else kept serving the previous account's row for the rest of that
+ * window. Cheap: one small JSON file. Never leaves the server.
+ */
+export function claudeAccountKey(): string {
+  const { uuid, account } = readAccount();
+  return uuid ?? account?.email ?? "none";
+}
+
 export async function collectClaudeUsage(): Promise<AgentUsage> {
-  const account = readAccount();
+  const { account, uuid } = readAccount();
   const snapshot = readJsonFile<Snapshot>(SNAPSHOT_FILE);
   const todayTokens = await readTodayTokens();
 
@@ -170,14 +244,25 @@ export async function collectClaudeUsage(): Promise<AgentUsage> {
       ? new Date(snapshot.observedAt * 1000).toISOString()
       : null;
 
-  const fiveHour = toWindow(snapshot?.fiveHour);
-  const sevenDay = toWindow(snapshot?.sevenDay);
+  const accountMatch = accountMatchOf(snapshot, uuid);
 
-  // Account but no snapshot is the ordinary "hook not installed yet" state, and
-  // it is worth naming precisely: without it the panel would just show two
-  // empty gauges and look broken.
-  const unavailable =
-    !account && !snapshot && todayTokens === null
+  // Limits proven to belong to someone else are not shown at all. Labelling
+  // them would still put a number next to this account's name, and that
+  // number is about a different plan.
+  const mismatched = accountMatch === "MISMATCHED";
+  const primary = mismatched
+    ? null
+    : toWindow(snapshot?.primary ?? snapshot?.fiveHour, LEGACY_WINDOW_MINUTES.primary);
+  const secondary = mismatched
+    ? null
+    : toWindow(snapshot?.secondary ?? snapshot?.sevenDay, LEGACY_WINDOW_MINUTES.secondary);
+
+  // Each of these is a different thing to do about it, so each says which:
+  // sign in, install the hook, or open Claude Code once so the hook runs
+  // under the account now signed in.
+  const unavailable = mismatched
+    ? "다른 계정에서 기록된 한도입니다. 현재 계정의 한도는 미확인입니다"
+    : !account && !snapshot && todayTokens === null
       ? "Claude CLI 기록을 찾지 못했습니다 (~/.claude)"
       : !snapshot
         ? "한도 스냅샷이 없습니다 — statusline 훅을 설치하세요"
@@ -186,9 +271,14 @@ export async function collectClaudeUsage(): Promise<AgentUsage> {
   return {
     agent: "claude",
     account,
-    fiveHour,
-    sevenDay,
+    primary,
+    secondary,
+    accountMatch,
     todayTokens,
+    // Summed across every project transcript on this machine, whichever
+    // account produced it — not a per-account figure, and not comparable with
+    // the plan gauges above it.
+    todayTokensScope: todayTokens === null ? null : "LOCAL_ALL_SESSIONS",
     observedAt,
     unavailable,
   };

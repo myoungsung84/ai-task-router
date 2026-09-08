@@ -35,13 +35,18 @@ export const config = {
   webOrigin: process.env.WEB_ORIGIN ?? "http://localhost:9913",
 
   /**
-   * Show the Codex account's email on the usage panel. Off unless explicitly
-   * enabled, because that one string is the only reason to open
-   * `~/.codex/auth.json`, and that file also holds live access and refresh
-   * tokens. Left off, the panel never reads a credential file at all — the
-   * Codex plan comes from the session rollout instead, and only the account
-   * label is missing. Claude is unaffected either way: its profile lives in
-   * `~/.claude.json`, which holds no tokens.
+   * Show the Codex account's email on the usage panel. Off by default.
+   *
+   * This used to be a decision about reading a credential file: the email was
+   * pulled out of `~/.codex/auth.json`, which also holds live access and
+   * refresh tokens. That is no longer how it is obtained — `codex app-server`
+   * answers `account/read` with the email, and `auth.json` is never opened.
+   *
+   * The flag stays because displaying an account address is still a choice
+   * worth having off by default on a dashboard that gets screenshotted and
+   * screen-shared. Turning it off costs only the label; the plan and the
+   * limits come from the same CLI answer either way. Claude is unaffected: its
+   * profile lives in `~/.claude.json`, which holds no tokens.
    */
   usageShowAccount: (process.env.USAGE_SHOW_ACCOUNT ?? "").toLowerCase() === "true",
 };

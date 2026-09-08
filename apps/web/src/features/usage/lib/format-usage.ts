@@ -1,11 +1,24 @@
 import { kstDateString } from "@/lib/format";
 
-/** `12.4k` / `11.0M` — the row has one column for this, so it never wraps. */
+/**
+ * `1.2만` / `3200만` / `2.1억` — Korean myriad grouping, not k/M.
+ *
+ * Korean reads large numbers in units of 만(10⁴) and 억(10⁸), so "208.2M" has
+ * to be converted in the head before it means anything. Precision follows the
+ * unit rather than a fixed number of decimals: once a figure is in the
+ * hundreds of 만, a decimal place is noise, and one place is what makes 억
+ * readable at all.
+ *
+ * The row has one column for this, so it never wraps.
+ */
 export function formatTokens(tokens: number | null): string {
   if (tokens === null) return "-";
-  if (tokens < 1_000) return String(tokens);
-  if (tokens < 1_000_000) return `${(tokens / 1_000).toFixed(1)}k`;
-  return `${(tokens / 1_000_000).toFixed(1)}M`;
+  const EOK = 100_000_000;
+  const MAN = 10_000;
+  if (tokens >= EOK) return `${(tokens / EOK).toFixed(1)}억`;
+  if (tokens >= 100 * MAN) return `${Math.round(tokens / MAN)}만`;
+  if (tokens >= MAN) return `${(tokens / MAN).toFixed(1)}만`;
+  return String(tokens);
 }
 
 /**
@@ -68,4 +81,23 @@ export function ageHours(iso: string | null): number | null {
   const ms = Date.now() - new Date(iso).getTime();
   if (!Number.isFinite(ms) || ms < 0) return null;
   return ms / 3_600_000;
+}
+
+/**
+ * `5h` / `7d` — the window's own length, from what the CLI reported.
+ *
+ * The two windows used to be labelled from hardcoded field names, which said
+ * "5h" whether or not that was the length the CLI had actually given. When a
+ * length is missing the label says so (`?`) instead of picking one.
+ */
+export function formatWindowLabel(windowMinutes: number | null): string {
+  if (windowMinutes === null || windowMinutes <= 0) return "?";
+  if (windowMinutes < 60) return `${windowMinutes}m`;
+  if (windowMinutes < 1440) return `${Math.round(windowMinutes / 60)}h`;
+  return `${Math.round(windowMinutes / 1440)}d`;
+}
+
+/** `18%`, or `미확인` when there is no reading. Never renders a missing value as 0%. */
+export function formatPercent(value: number | null): string {
+  return value === null ? "미확인" : `${Math.round(value)}%`;
 }

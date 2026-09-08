@@ -51,12 +51,42 @@ function readStdin() {
   });
 }
 
-function windowOf(value) {
+/**
+ * The account Claude Code is signed in as, or null.
+ *
+ * Stamped onto the snapshot so the dashboard can tell whether the limits it
+ * reads still belong to the account currently signed in. Without it, signing
+ * in as someone else left the previous account's percentages rendering under
+ * the new name with nothing to catch it.
+ *
+ * `accountUuid` is an opaque id, not an address — the email is deliberately
+ * not copied here. The profile file holds no tokens.
+ */
+function accountUuid() {
+  try {
+    const raw = fs.readFileSync(path.join(os.homedir(), ".claude.json"), "utf8");
+    const id = JSON.parse(raw)?.oauthAccount?.accountUuid;
+    return typeof id === "string" && id ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param value the payload's window object
+ * @param impliedMinutes the duration the payload's own key name states, used
+ *   only when the window does not report its length itself. Recording the
+ *   length at all is the point: the reader must not infer "5 hours" from a
+ *   field name it happens to know.
+ */
+function windowOf(value, impliedMinutes) {
   if (!value || typeof value !== "object") return null;
   const usedPercent = value.used_percentage;
   if (typeof usedPercent !== "number") return null;
+  const reported = value.window_minutes;
   return {
     usedPercent,
+    windowMinutes: typeof reported === "number" && reported > 0 ? reported : impliedMinutes,
     // 0 stands for "not reported" — the reader treats it as absent rather than
     // as the epoch.
     resetsAt: typeof value.resets_at === "number" ? Math.round(value.resets_at) : 0,
@@ -70,15 +100,20 @@ function windowOf(value) {
  */
 function writeSnapshot(payload) {
   const limits = payload?.rate_limits;
-  const fiveHour = windowOf(limits?.five_hour);
-  const sevenDay = windowOf(limits?.seven_day);
-  if (!fiveHour && !sevenDay) return;
+  const primary = windowOf(limits?.five_hour, 300);
+  const secondary = windowOf(limits?.seven_day, 10080);
+  if (!primary && !secondary) return;
 
   const target = path.join(claudeConfigDir(), SNAPSHOT_FILE);
   const body = JSON.stringify({
+    version: 2,
     observedAt: Math.floor(Date.now() / 1000),
-    fiveHour: fiveHour ?? { usedPercent: 0, resetsAt: 0 },
-    sevenDay: sevenDay ?? { usedPercent: 0, resetsAt: 0 },
+    accountUuid: accountUuid(),
+    // A window Claude did not report is written as null, not as a zeroed
+    // window. A zeroed window reads as "0% used", which is a different claim
+    // from "not reported".
+    primary,
+    secondary,
   });
 
   try {

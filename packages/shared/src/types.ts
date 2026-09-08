@@ -627,10 +627,30 @@ export interface DailySummary {
  * a rolled-over window as 0% rather than as a stale high-water mark.
  */
 export interface UsageWindow {
-  usedPercent: number;
+  /**
+   * How much of this window is used, or `null` when that is not known.
+   *
+   * `null` and `0` are different answers and used to be the same one: an
+   * expired window, an unreadable snapshot, and a genuinely fresh window all
+   * reported 0%. A gauge sitting at 0% is a claim, so it is only made when
+   * the number was actually read.
+   */
+  usedPercent: number | null;
+  /** `100 - usedPercent`, carried explicitly so a row can show headroom without the reader doing the subtraction. `null` follows `usedPercent`. */
+  remainingPercent: number | null;
+  /**
+   * The window's own length in minutes, as the CLI reported it — 300 and
+   * 10080 in practice, but read rather than assumed.
+   *
+   * This exists because the two windows used to be named `fiveHour` and
+   * `sevenDay` in code, which hardcoded a duration the CLI is free to change
+   * and which Codex was already reporting in `window_minutes`. `null` when
+   * the CLI did not say.
+   */
+  windowMinutes: number | null;
   /** ISO 8601, or null when the CLI reported no reset time. */
   resetsAt: string | null;
-  /** `resetsAt` is in the past — the window has already rolled over. */
+  /** `resetsAt` is in the past — the window has already rolled over, so `usedPercent` is null rather than 0. */
   expired: boolean;
 }
 
@@ -642,13 +662,51 @@ export interface UsageAccount {
   organization: string | null;
 }
 
+/**
+ * Whether the plan limits shown next to an account were shown to be that
+ * account's.
+ *
+ * The account name and the limits do not always come from the same place, and
+ * when they don't, nothing ties them together — so signing in as someone else
+ * left the previous account's percentages rendering under the new name, with
+ * no expiry and nothing to catch it.
+ *
+ * - `VERIFIED` — the limits and the account came from one answer, or the
+ *   limits carry an account id that matches the one signed in. Codex reaches
+ *   this by asking its CLI for both in the same session; Claude by comparing
+ *   the id its status-line hook stamps onto the snapshot.
+ * - `UNVERIFIABLE` — there is nothing to compare. A Claude snapshot written
+ *   before the stamp existed is this until the next interactive turn
+ *   overwrites it, and so is a Codex read whose CLI query failed. Whatever is
+ *   readable is still shown, labelled — blanking it would be worse.
+ * - `MISMATCHED` — the limits provably belong to a different account. Not
+ *   shown at all: a number next to this account's name would be about
+ *   someone else's plan.
+ */
+export type UsageAccountMatch = "VERIFIED" | "UNVERIFIABLE" | "MISMATCHED";
+
+/** What a token total actually counts, so it is not read as a per-account figure. */
+export type UsageTokenScope =
+  /** Every local session of this CLI on this machine, whichever account ran it. */
+  "LOCAL_ALL_SESSIONS";
+
 export interface AgentUsage {
+  additionalLimits?: {
+    label: string;
+    primary: UsageWindow | null;
+    secondary: UsageWindow | null;
+    observedAt: string | null;
+  }[];
   agent: AgentName;
   account: UsageAccount | null;
-  fiveHour: UsageWindow | null;
-  sevenDay: UsageWindow | null;
+  /** Do not treat the two windows as fixed durations — read `windowMinutes`. */
+  primary: UsageWindow | null;
+  secondary: UsageWindow | null;
+  accountMatch: UsageAccountMatch;
   /** Tokens this agent used today (Asia/Seoul), or null when it cannot be read. */
   todayTokens: number | null;
+  /** What `todayTokens` sums. Null when there is no figure. */
+  todayTokensScope: UsageTokenScope | null;
   /**
    * ISO 8601 — when these numbers were actually observed, which is *not* "now".
    * Both CLIs only record their limits while they run, so a snapshot can be
