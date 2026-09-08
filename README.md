@@ -88,6 +88,51 @@ pnpm dev:server
 pnpm dev:web
 ```
 
+## 실행 (자동 재시작 없음)
+
+`pnpm dev`는 파일이 바뀌면 서버를 다시 띄웁니다. Task를 실행해 두고 쓰는 중이라면
+그 재시작이 실행 중인 CLI 프로세스를 잃게 만들 수 있으므로, 그럴 때는 빌드 결과를
+그대로 실행하는 `pnpm start`를 씁니다. watch도 hot reload도 없습니다.
+
+최초 1회:
+
+```bash
+pnpm install   # postinstall이 packages/shared를 빌드합니다
+pnpm build     # 서버 + 웹
+```
+
+시작:
+
+```bash
+pnpm start
+```
+
+- Web: http://localhost:9913
+- Server: http://localhost:9914
+
+종료는 `Ctrl+C`입니다. 서버와 웹 중 하나가 먼저 죽으면 나머지도 함께 정리되므로,
+포트를 잡고 있는 프로세스가 남지 않습니다.
+
+코드를 고친 뒤에는 다시 빌드해야 반영됩니다 — `pnpm start`는 빌드 결과만 실행합니다.
+
+```bash
+pnpm build                                  # 전체
+pnpm build:server                           # 서버만
+pnpm build:web                              # 웹만
+pnpm --filter @ai-task-router/shared build  # 공용 타입만
+```
+
+빌드 결과가 없으면 `pnpm start`는 시작하지 않고 어떤 산출물이 없는지와 실행할 명령을
+알려줍니다.
+
+## 테스트
+
+```bash
+pnpm test
+```
+
+로컬 단위 테스트만 실행하며 CLI나 외부 API를 호출하지 않습니다.
+
 ## 기본 Task 실행 흐름
 
 1. 헤더의 **새 작업** 버튼 → 다이얼로그에서 생성합니다(작업 생성 전용
@@ -276,3 +321,9 @@ worktree, GitLab API/MR 자동화, git push 자동화, 자동 merge, 외부 배�
 직접 결합되어 있지 않습니다. REST 라우트(`apps/server/src/tasks/task-routes.ts`)와
 MCP tools(`apps/server/src/mcp/tools/task-tools.ts`)는 둘 다 이 레이어를 호출하는
 얇은 adapter일 뿐이며, Task 생성/실행/취소/조회 로직은 한 곳에만 존재합니다.
+
+### 사용량 조회 설치 범위
+
+`setup:usage-hook`과 `uninstall:usage-hook`은 **Claude 상태줄 연동 전용**입니다.
+Codex는 설치된 CLI의 계정·한도 조회를 사용하므로 별도 훅 설치가 필요 없습니다.
+Claude는 현재 파일 방식이므로 직접 조회로 대체하기 전까지 설치 명령을 유지합니다.
