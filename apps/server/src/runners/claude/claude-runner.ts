@@ -34,8 +34,8 @@ const SUMMARY_TAIL_LIMIT = 4000;
 /**
  * Claude, as either an implement/analyze agent or a reviewer — Claude is not
  * pinned to one role. `permission` picks the CLI's permission mode:
- * "write" -> acceptEdits (auto-accepts file edits), "read-only" -> plan
- * (Claude reasons/reports but the CLI itself blocks actual edits).
+ * 쓰기 작업은 기본적으로 Claude 설정을 따르고, CLAUDE_PERMISSION_MODE로 재정의한다.
+ * 읽기 전용 작업은 해당 설정과 무관하게 plan 모드로 편집을 차단한다.
  *
  * The instruction is always passed as a single argv element (never
  * interpolated into a shell string), so nothing in it can break out into a
@@ -58,7 +58,8 @@ export function runClaudeStep(
       : instruction;
   const permissionMode = permission === "write" ? config.claudePermissionMode : "plan";
 
-  const args = ["-p", prompt, "--permission-mode", permissionMode];
+  const args = ["-p", prompt];
+  if (permissionMode) args.push("--permission-mode", permissionMode);
   if (model) args.push("--model", model);
   const child = safeSpawn(config.claudeBin, args, { cwd });
 

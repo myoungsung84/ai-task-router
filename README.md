@@ -51,9 +51,14 @@ cp apps/server/.env.example apps/server/.env
 cp apps/web/.env.local.example apps/web/.env.local
 ```
 
-기본값(서버 `9914`포트, 웹 `9913`포트, `CLAUDE_PERMISSION_MODE=acceptEdits`)
+기본값(서버 `9914`포트, 웹 `9913`포트)
 그대로도 로컬에서 바로 동작합니다. 각 파일의 주석을 참고해 필요한 값만
 조정하세요.
+
+Claude 쓰기 작업은 기본적으로 Claude의 사용자·프로젝트 권한 설정을 따릅니다.
+`CLAUDE_PERMISSION_MODE`를 지정하면 쓰기 작업에만 해당 모드를 적용하며,
+읽기 전용 작업은 항상 `plan`을 사용합니다. 비대화형 실행에서는 권한 승인 질문에
+응답할 수 없으므로 필요한 명령이 Claude 설정에서 허용되어 있어야 합니다.
 
 ## 사용량 패널 (선택)
 

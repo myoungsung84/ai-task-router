@@ -21,12 +21,9 @@ export const config = {
   codexBin: process.env.CODEX_BIN ?? "codex",
 
   /**
-   * Permission mode passed to `claude -p`. Non-interactive runs cannot answer
-   * prompts, so something other than the interactive default is required.
-   * "acceptEdits" auto-accepts file edits but still gates riskier tool use.
-   * Override with CLAUDE_PERMISSION_MODE if a project needs e.g. bypassPermissions.
+   * 쓰기 작업의 권한 모드 재정의. 비어 있으면 Claude의 사용자·프로젝트 설정을 따른다.
    */
-  claudePermissionMode: process.env.CLAUDE_PERMISSION_MODE ?? "acceptEdits",
+  claudePermissionMode: process.env.CLAUDE_PERMISSION_MODE?.trim() ?? "",
 
   /** Codex model override, empty = Codex CLI default. */
   codexModel: process.env.CODEX_MODEL ?? "",

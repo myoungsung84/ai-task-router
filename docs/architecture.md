@@ -185,11 +185,12 @@ overrides?)`, the one function that turns a `TaskPurpose` + `Settings.roles`
   what to actually do about it. A cause is only named when it was observed —
   unmatched output stays `EXECUTION_FAILED` ("read the log") rather than
   guessing.
-- `runners/claude/claude-runner.ts` — spawns `claude -p "<prompt>"
---permission-mode <mode>` (plus `--model <model>` when the Step has one) with
-  `cwd` set to the project path. `permission: "write"` → `acceptEdits`;
-  `"read-only"` → `plan` (Claude reasons/reports but the CLI itself blocks
-  edits). For a `review` Step the prompt asks for the `{result, issues[]}`
+- `runners/claude/claude-runner.ts` — `claude -p "<prompt>"`를 프로젝트 경로에서 실행하며,
+  Step에 모델이 있으면 `--model <model>`을 전달한다. `permission: "write"`는 기본적으로
+  Claude의 사용자·프로젝트 권한 설정을 따른다. `CLAUDE_PERMISSION_MODE`가 비어 있지
+  않을 때만 `--permission-mode <mode>`를 전달하며, `"read-only"`는 항상
+  `--permission-mode plan`을 전달해 편집을 차단한다.
+  For a `review` Step the prompt asks for the `{result, issues[]}`
   JSON directly (Claude's `-p` mode has no schema-enforcement flag equivalent
   to Codex's `--output-schema`), parsed back out of the trailing output.
 
